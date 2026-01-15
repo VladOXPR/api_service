@@ -1,5 +1,6 @@
 const express = require('express');
 const { loginToEnergo, closeBrowser } = require('./energoLogin');
+const userRoutes = require('./user_service_api');
 const path = require('path');
 
 // Load environment variables
@@ -8,6 +9,12 @@ require('dotenv').config({ path: path.join(__dirname, '.env.local') });
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Middleware
+app.use(express.json());
+
+// Mount user routes
+app.use('/', userRoutes);
 
 /**
  * GET endpoint to retrieve the Energo API token
