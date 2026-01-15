@@ -36,6 +36,14 @@ if (process.env.CLOUD_SQL_CONNECTION_NAME || CLOUD_SQL_CONNECTION_NAME.includes(
 
 const pool = new Pool(poolConfig);
 
+// Log connection configuration (without password)
+console.log('🔌 Database connection config:', {
+  host: poolConfig.host,
+  user: poolConfig.user,
+  database: poolConfig.database,
+  port: poolConfig.port || 'N/A (Unix socket)'
+});
+
 // Test database connection
 pool.on('connect', () => {
   console.log('✅ Connected to PostgreSQL database');
@@ -43,7 +51,8 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error('❌ Unexpected error on idle client', err);
-  process.exit(-1);
+  // Don't exit process - let it continue and log the error
+  // The routes will handle connection errors gracefully
 });
 
 /**
@@ -51,6 +60,7 @@ pool.on('error', (err) => {
  * Fetch a list of all users
  */
 router.get('/users', async (req, res) => {
+  console.log('GET /users endpoint called');
   let client;
   try {
     client = await pool.connect();
@@ -343,6 +353,9 @@ router.patch('/users/:id', async (req, res) => {
     }
   }
 });
+
+// Log when router is loaded
+console.log('📦 User service API router initialized with routes: GET, POST, PATCH, DELETE /users');
 
 module.exports = router;
 

@@ -1,7 +1,23 @@
 const express = require('express');
 const { loginToEnergo, closeBrowser } = require('./energoLogin');
-const userRoutes = require('./user_service_api');
 const path = require('path');
+
+// Load user routes with error handling
+let userRoutes;
+try {
+  userRoutes = require('./user_service_api');
+  console.log('✅ User service API routes loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading user service API routes:', error);
+  // Create a dummy router to prevent app crash
+  userRoutes = express.Router();
+  userRoutes.get('*', (req, res) => {
+    res.status(500).json({
+      success: false,
+      error: 'User service API not available: ' + error.message
+    });
+  });
+}
 
 // Load environment variables
 require('dotenv').config({ path: path.join(__dirname, '.env') });
