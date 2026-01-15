@@ -13,7 +13,9 @@ router.use(express.json());
 const CLOUD_SQL_CONNECTION_NAME = process.env.CLOUD_SQL_CONNECTION_NAME || 'keyextract-482721:us-central1:cuub-db';
 const DB_USER = process.env.DB_USER || 'postgres';
 const DB_PASS = process.env.DB_PASS || '1Cuubllc!';
-const DB_NAME = process.env.DB_NAME || 'cuub-db';
+// Note: DB_NAME is the database name inside the instance (not the instance name)
+// The instance is "cuub-db" but the database is "postgres"
+const DB_NAME = process.env.DB_NAME || 'postgres';
 
 // Log the connection name being used
 console.log('📋 Cloud SQL Connection Name:', CLOUD_SQL_CONNECTION_NAME);
