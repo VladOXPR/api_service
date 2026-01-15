@@ -15,6 +15,10 @@ const DB_USER = process.env.DB_USER || 'postgres';
 const DB_PASS = process.env.DB_PASS || '1Cuubllc!';
 const DB_NAME = process.env.DB_NAME || 'cuub-db';
 
+// Log the connection name being used
+console.log('📋 Cloud SQL Connection Name:', CLOUD_SQL_CONNECTION_NAME);
+console.log('📋 From environment variable:', process.env.CLOUD_SQL_CONNECTION_NAME ? 'YES' : 'NO (using default)');
+
 // Create connection pool
 // For Cloud SQL, use Unix socket when running on Cloud Run
 const poolConfig = {
@@ -26,17 +30,24 @@ const poolConfig = {
 // Check if we're running on Cloud Run (has Cloud SQL connection)
 // NOTE: For Cloud Run to connect to Cloud SQL, you must:
 // 1. Add Cloud SQL instance to Cloud Run service: Edit service -> Connections -> Add Cloud SQL connection
+//    This is DIFFERENT from just setting the environment variable - you must add it in the Connections tab!
 // 2. Grant service account the "Cloud SQL Client" role (roles/cloudsql.client)
 // 3. Ensure Cloud SQL Admin API is enabled
-if (process.env.CLOUD_SQL_CONNECTION_NAME || CLOUD_SQL_CONNECTION_NAME.includes(':')) {
+//
+// IMPORTANT: Even if CLOUD_SQL_CONNECTION_NAME env var is set, Cloud Run won't create the Unix socket
+// unless you explicitly add the connection in the Cloud Run service settings (Connections tab)
+const useCloudSql = process.env.CLOUD_SQL_CONNECTION_NAME || CLOUD_SQL_CONNECTION_NAME.includes(':');
+if (useCloudSql) {
   // Use Unix socket for Cloud SQL on Cloud Run
   // pg library automatically appends .s.PGSQL.5432 for PostgreSQL
   poolConfig.host = `/cloudsql/${CLOUD_SQL_CONNECTION_NAME}`;
+  console.log('🔌 Using Cloud SQL Unix socket connection');
 } else {
   // For local development, use standard connection
   // You may need to set DB_HOST and DB_PORT environment variables
   poolConfig.host = process.env.DB_HOST || 'localhost';
   poolConfig.port = process.env.DB_PORT || 5432;
+  console.log('🔌 Using TCP connection');
 }
 
 const pool = new Pool(poolConfig);
