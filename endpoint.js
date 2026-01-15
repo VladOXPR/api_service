@@ -32,6 +32,18 @@ app.use(express.json());
 
 // Mount user routes
 app.use('/', userRoutes);
+console.log('🔗 User routes mounted at root path');
+
+// Debug: Log all registered routes (development only)
+if (process.env.NODE_ENV !== 'production') {
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      console.log(`   ${Object.keys(middleware.route.methods).join(', ').toUpperCase()} ${middleware.route.path}`);
+    } else if (middleware.name === 'router') {
+      console.log(`   Router mounted at: ${middleware.regexp}`);
+    }
+  });
+}
 
 /**
  * GET endpoint to retrieve the Energo API token
