@@ -224,7 +224,7 @@ router.get('/stations', async (req, res) => {
     
     client = await pool.connect();
     const result = await client.query(
-      'SELECT id, title, latitude, longitude, updated_at FROM stations ORDER BY updated_at DESC'
+      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id FROM stations ORDER BY updated_at DESC'
     );
     
     // Enrich each station with battery availability data
@@ -304,7 +304,7 @@ router.get('/stations/:id', async (req, res) => {
     
     client = await pool.connect();
     const result = await client.query(
-      'SELECT id, title, latitude, longitude, updated_at FROM stations WHERE id = $1',
+      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id FROM stations WHERE id = $1',
       [id]
     );
     
@@ -341,6 +341,140 @@ router.get('/stations/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to fetch station'
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+/**
+ * Helper function to convert array of objects to CSV string
+ */
+function arrayToCSV(data, headers) {
+  if (!data || data.length === 0) {
+    return headers.join(',') + '\n';
+  }
+
+  // Create CSV header row
+  const csvRows = [headers.join(',')];
+
+  // Create CSV data rows
+  for (const row of data) {
+    const values = headers.map(header => {
+      const value = row[header];
+      // Handle null/undefined values
+      if (value === null || value === undefined) {
+        return '';
+      }
+      // Escape commas and quotes in string values
+      const stringValue = String(value);
+      if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      }
+      return stringValue;
+    });
+    csvRows.push(values.join(','));
+  }
+
+  return csvRows.join('\n');
+}
+
+/**
+ * GET /stations/export
+ * Export stations list as CSV file
+ */
+router.get('/stations/export', async (req, res) => {
+  console.log('GET /stations/export endpoint called');
+  let client;
+  try {
+    // Get token from database
+    const token = await getTokenFromDatabase();
+    if (!token) {
+      console.warn('⚠️ No token found in database for Relink API calls');
+    }
+    
+    client = await pool.connect();
+    const result = await client.query(
+      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id FROM stations ORDER BY updated_at DESC'
+    );
+    
+    // Enrich each station with battery availability data
+    const stationsWithBatteryInfo = await Promise.all(
+      result.rows.map(async (station) => {
+        if (token) {
+          const batteryInfo = await getBatteryAvailability(station.id, token);
+          return {
+            ...station,
+            filled_slots: batteryInfo.filled_slots,
+            open_slots: batteryInfo.open_slots
+          };
+        } else {
+          return {
+            ...station,
+            filled_slots: null,
+            open_slots: null
+          };
+        }
+      })
+    );
+    
+    // Generate filename with current date (YYYY-MM-DD format for filename safety)
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const filename = `stations_${year}-${month}-${day}.csv`;
+    
+    // Define CSV headers
+    const csvHeaders = [
+      'id',
+      'title',
+      'latitude',
+      'longitude',
+      'updated_at',
+      'address',
+      'screen_id',
+      'sim_id',
+      'filled_slots',
+      'open_slots'
+    ];
+    
+    // Convert data to CSV
+    const csvContent = arrayToCSV(stationsWithBatteryInfo, csvHeaders);
+    
+    // Set headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', Buffer.byteLength(csvContent, 'utf8'));
+    
+    // Send CSV file
+    res.send(csvContent);
+    
+    console.log(`✅ Exported ${stationsWithBatteryInfo.length} stations to ${filename}`);
+  } catch (error) {
+    console.error('Error exporting stations:', error);
+    
+    // Provide helpful error messages for common connection issues
+    let errorMessage = error.message || 'Failed to export stations';
+    let statusCode = 500;
+    
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      errorMessage = 'Database connection refused. Please ensure: 1) Cloud SQL instance is added to Cloud Run service connections, 2) Service account has Cloud SQL Client role, 3) Cloud SQL Admin API is enabled.';
+      statusCode = 503;
+    } else if (error.message?.includes('NOT_AUTHORIZED') || error.message?.includes('permission')) {
+      errorMessage = 'Database permission denied. Please ensure the Cloud Run service account has the "Cloud SQL Client" IAM role.';
+      statusCode = 503;
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage,
+      details: process.env.NODE_ENV !== 'production' ? {
+        code: error.code,
+        connectionName: CLOUD_SQL_CONNECTION_NAME
+      } : undefined
     });
   } finally {
     if (client) {
