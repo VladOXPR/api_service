@@ -56,6 +56,9 @@ try {
 let tokenRoutes;
 try {
   const tokenExtract = require('./token_extract');
+  if (!tokenExtract || !tokenExtract.router) {
+    throw new Error('token_extract module did not export router');
+  }
   tokenRoutes = tokenExtract.router;
   console.log('✅ Token service API routes loaded successfully');
 } catch (error) {
