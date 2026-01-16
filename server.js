@@ -1,9 +1,20 @@
 const express = require('express');
 const path = require('path');
 
+// Log startup
+console.log('🚀 Starting server...');
+console.log('📋 Node version:', process.version);
+console.log('📋 NODE_ENV:', process.env.NODE_ENV || 'not set');
+console.log('📋 PORT:', process.env.PORT || '8080 (default)');
+
 // Load environment variables FIRST (before loading routes that need them)
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-require('dotenv').config({ path: path.join(__dirname, '.env.local') });
+try {
+  require('dotenv').config({ path: path.join(__dirname, '.env') });
+  require('dotenv').config({ path: path.join(__dirname, '.env.local') });
+  console.log('✅ Environment variables loaded');
+} catch (error) {
+  console.warn('⚠️ Error loading .env files (may not exist):', error.message);
+}
 
 // Load user routes with error handling
 let userRoutes;
@@ -99,19 +110,39 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Start the server
+// Start the server with error handling
 // Bind to 0.0.0.0 to listen on all network interfaces (required for Cloud Run)
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
-    console.log(`📡 GET endpoint available at: http://0.0.0.0:${PORT}/token`);
-    console.log(`❤️  Health check available at: http://0.0.0.0:${PORT}/health`);
-    console.log(`✅ Server is ready to accept connections`);
-});
+try {
+    const server = app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+        console.log(`📡 GET endpoint available at: http://0.0.0.0:${PORT}/token`);
+        console.log(`❤️  Health check available at: http://0.0.0.0:${PORT}/health`);
+        console.log(`✅ Server is ready to accept connections`);
+    });
 
-// Handle server errors
-app.on('error', (error) => {
-    console.error('❌ Server error:', error);
+    // Handle server errors
+    server.on('error', (error) => {
+        console.error('❌ Server listen error:', error);
+        if (error.code === 'EADDRINUSE') {
+            console.error(`❌ Port ${PORT} is already in use`);
+        }
+        process.exit(1);
+    });
+
+    // Handle process errors
+    process.on('uncaughtException', (error) => {
+        console.error('❌ Uncaught Exception:', error);
+        process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+        // Don't exit on unhandled rejection, just log it
+    });
+} catch (error) {
+    console.error('❌ Failed to start server:', error);
+    console.error('Error stack:', error.stack);
     process.exit(1);
-});
+}
 
 module.exports = app;
