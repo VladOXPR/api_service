@@ -676,3 +676,149 @@ module.exports = {
 if (require.main === module) {
     testLogin().catch(console.error);
 }
+
+// ========================================
+// EXPRESS ROUTER FOR TOKEN ENDPOINT
+// ========================================
+const express = require('express');
+const { Pool } = require('pg');
+const router = express.Router();
+
+// Database configuration (reusing same connection config as other services)
+const CLOUD_SQL_CONNECTION_NAME = process.env.CLOUD_SQL_CONNECTION_NAME || 'keyextract-482721:us-central1:cuub-db';
+const DB_USER = process.env.DB_USER || 'postgres';
+const DB_PASS = process.env.DB_PASS || '1Cuubllc!';
+const DB_NAME = process.env.DB_NAME || 'postgres';
+
+// Create connection pool for token storage
+const poolConfig = {
+  user: DB_USER,
+  password: DB_PASS,
+  database: DB_NAME,
+};
+
+const useCloudSql = process.env.CLOUD_SQL_CONNECTION_NAME || CLOUD_SQL_CONNECTION_NAME.includes(':');
+if (useCloudSql) {
+  poolConfig.host = `/cloudsql/${CLOUD_SQL_CONNECTION_NAME}`;
+} else {
+  poolConfig.host = process.env.DB_HOST || 'localhost';
+  poolConfig.port = process.env.DB_PORT || 5432;
+}
+
+const tokenPool = new Pool(poolConfig);
+
+// Test database connection
+tokenPool.on('connect', () => {
+  console.log('✅ Token Service: Connected to PostgreSQL database');
+});
+
+tokenPool.on('error', (err) => {
+  console.error('❌ Token Service: Unexpected error on idle client', err);
+});
+
+/**
+ * GET /token
+ * Retrieve the Energo API token
+ * Returns a JSON response with the token
+ */
+router.get('/token', async (req, res) => {
+    let loginResult = null;
+    
+    try {
+        // Get credentials from environment variables
+        const username = process.env.ENERGO_USERNAME;
+        const password = process.env.ENERGO_PASSWORD;
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+        
+        // Validate required environment variables
+        if (!username || !password) {
+            return res.status(500).json({
+                success: false,
+                error: 'ENERGO_USERNAME and ENERGO_PASSWORD environment variables are required'
+            });
+        }
+        
+        if (!openaiApiKey) {
+            return res.status(500).json({
+                success: false,
+                error: 'OPENAI_API_KEY environment variable is required'
+            });
+        }
+        
+        // Perform login to get the token
+        loginResult = await loginToEnergo({
+            username: username,
+            password: password,
+            captcha: undefined, // Will be solved using OpenAI
+            openaiApiKey: openaiApiKey,
+            headless: true, // Run in headless mode for server
+            timeout: 30000
+        });
+        
+        // Check if login was successful
+        if (!loginResult.success) {
+            return res.status(401).json({
+                success: false,
+                error: 'Login failed. Please check credentials.',
+                url: loginResult.url,
+                title: loginResult.title
+            });
+        }
+        
+        // Check if token was captured
+        if (!loginResult.token) {
+            return res.status(500).json({
+                success: false,
+                error: 'Token was not captured. The login may have succeeded but the API token was not found.',
+                url: loginResult.url
+            });
+        }
+        
+        // Save token to PostgreSQL database
+        let dbClient;
+        try {
+            dbClient = await tokenPool.connect();
+            // Delete existing tokens and insert the new one
+            // This ensures only one token is stored at a time
+            await dbClient.query('DELETE FROM token');
+            await dbClient.query('INSERT INTO token (value) VALUES ($1)', [loginResult.token]);
+            console.log('✅ Token saved to database successfully');
+        } catch (dbError) {
+            console.error('❌ Error saving token to database:', dbError);
+            // Don't fail the request if database save fails - still return the token
+            // This allows the API to work even if there's a temporary database issue
+        } finally {
+            if (dbClient) {
+                dbClient.release();
+            }
+        }
+        
+        // Return the token as JSON
+        return res.json({
+            success: true,
+            token: loginResult.token
+        });
+        
+    } catch (error) {
+        console.error('Error in /token endpoint:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'An error occurred while retrieving the token'
+        });
+    } finally {
+        // Always close the browser to free up resources
+        if (loginResult) {
+            try {
+                await closeBrowser(loginResult);
+            } catch (closeError) {
+                console.error('Error closing browser:', closeError);
+            }
+        }
+    }
+});
+
+// Log when router is loaded
+console.log('📦 Token service API router initialized with route: GET /token');
+
+// Export both the functions (for backward compatibility) and the router
+module.exports.router = router;

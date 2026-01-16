@@ -2,10 +2,10 @@
   "name": "key-extract-service",
   "version": "1.0.0",
   "description": "Service to extract API tokens from Energo dashboard",
-  "main": "energoLogin.js",
+  "main": "token_extract.js",
   "scripts": {
     "start": "node server.js",
-    "test-login": "node energoLogin.js"
+    "test-login": "node token_extract.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
