@@ -74,6 +74,17 @@ try {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+/**
+ * Health check endpoint - define early for Cloud Run startup probe
+ */
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'energo-token-extractor',
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Middleware
 app.use(express.json());
 
@@ -99,16 +110,6 @@ if (process.env.NODE_ENV !== 'production') {
     }
   });
 }
-
-/**
- * Health check endpoint
- */
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        service: 'energo-token-extractor'
-    });
-});
 
 // Start the server with error handling
 // Bind to 0.0.0.0 to listen on all network interfaces (required for Cloud Run)
