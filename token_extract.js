@@ -663,20 +663,6 @@ async function testLogin() {
     }
 }
 
-// Export functions
-module.exports = {
-    loginToEnergo,
-    closeBrowser,
-    testLogin,
-    solveCaptchaWithOpenAI,
-    extractCaptchaImage
-};
-
-// If running directly, execute test
-if (require.main === module) {
-    testLogin().catch(console.error);
-}
-
 // ========================================
 // EXPRESS ROUTER FOR TOKEN ENDPOINT
 // ========================================
@@ -705,16 +691,25 @@ if (useCloudSql) {
   poolConfig.port = process.env.DB_PORT || 5432;
 }
 
-const tokenPool = new Pool(poolConfig);
-
-// Test database connection
-tokenPool.on('connect', () => {
-  console.log('✅ Token Service: Connected to PostgreSQL database');
-});
-
-tokenPool.on('error', (err) => {
-  console.error('❌ Token Service: Unexpected error on idle client', err);
-});
+// Create pool with error handling to prevent module load failures
+let tokenPool;
+try {
+  tokenPool = new Pool(poolConfig);
+  
+  // Test database connection
+  tokenPool.on('connect', () => {
+    console.log('✅ Token Service: Connected to PostgreSQL database');
+  });
+  
+  tokenPool.on('error', (err) => {
+    console.error('❌ Token Service: Unexpected error on idle client', err);
+    // Don't exit process - let it continue
+  });
+} catch (error) {
+  console.error('❌ Token Service: Error creating database pool:', error);
+  // Set tokenPool to null so the endpoint can handle it gracefully
+  tokenPool = null;
+}
 
 /**
  * GET /token
@@ -775,22 +770,26 @@ router.get('/token', async (req, res) => {
         }
         
         // Save token to PostgreSQL database
-        let dbClient;
-        try {
-            dbClient = await tokenPool.connect();
-            // Delete existing tokens and insert the new one
-            // This ensures only one token is stored at a time
-            await dbClient.query('DELETE FROM token');
-            await dbClient.query('INSERT INTO token (value) VALUES ($1)', [loginResult.token]);
-            console.log('✅ Token saved to database successfully');
-        } catch (dbError) {
-            console.error('❌ Error saving token to database:', dbError);
-            // Don't fail the request if database save fails - still return the token
-            // This allows the API to work even if there's a temporary database issue
-        } finally {
-            if (dbClient) {
-                dbClient.release();
+        if (tokenPool) {
+            let dbClient;
+            try {
+                dbClient = await tokenPool.connect();
+                // Delete existing tokens and insert the new one
+                // This ensures only one token is stored at a time
+                await dbClient.query('DELETE FROM token');
+                await dbClient.query('INSERT INTO token (value) VALUES ($1)', [loginResult.token]);
+                console.log('✅ Token saved to database successfully');
+            } catch (dbError) {
+                console.error('❌ Error saving token to database:', dbError);
+                // Don't fail the request if database save fails - still return the token
+                // This allows the API to work even if there's a temporary database issue
+            } finally {
+                if (dbClient) {
+                    dbClient.release();
+                }
             }
+        } else {
+            console.warn('⚠️ Token pool not available, skipping database save');
         }
         
         // Return the token as JSON
@@ -820,5 +819,17 @@ router.get('/token', async (req, res) => {
 // Log when router is loaded
 console.log('📦 Token service API router initialized with route: GET /token');
 
-// Export both the functions (for backward compatibility) and the router
-module.exports.router = router;
+// Export functions and router
+module.exports = {
+    loginToEnergo,
+    closeBrowser,
+    testLogin,
+    solveCaptchaWithOpenAI,
+    extractCaptchaImage,
+    router
+};
+
+// If running directly, execute test
+if (require.main === module) {
+    testLogin().catch(console.error);
+}

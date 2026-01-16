@@ -100,10 +100,18 @@ app.get('/health', (req, res) => {
 });
 
 // Start the server
-app.listen(PORT, () => {
-    console.log(`🚀 Server is running on http://localhost:${PORT}`);
-    console.log(`📡 GET endpoint available at: http://localhost:${PORT}/token`);
-    console.log(`❤️  Health check available at: http://localhost:${PORT}/health`);
+// Bind to 0.0.0.0 to listen on all network interfaces (required for Cloud Run)
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+    console.log(`📡 GET endpoint available at: http://0.0.0.0:${PORT}/token`);
+    console.log(`❤️  Health check available at: http://0.0.0.0:${PORT}/health`);
+    console.log(`✅ Server is ready to accept connections`);
+});
+
+// Handle server errors
+app.on('error', (error) => {
+    console.error('❌ Server error:', error);
+    process.exit(1);
 });
 
 module.exports = app;
