@@ -24,6 +24,24 @@ try {
   });
 }
 
+// Load map routes with error handling
+let mapRoutes;
+try {
+  mapRoutes = require('./map_service_api');
+  console.log('✅ Map service API routes loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading map service API routes:', error);
+  console.error('Error stack:', error.stack);
+  // Create a dummy router to prevent app crash
+  mapRoutes = express.Router();
+  mapRoutes.get('*', (req, res) => {
+    res.status(500).json({
+      success: false,
+      error: 'Map service API not available: ' + error.message
+    });
+  });
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -33,6 +51,10 @@ app.use(express.json());
 // Mount user routes
 app.use('/', userRoutes);
 console.log('🔗 User routes mounted at root path');
+
+// Mount map routes
+app.use('/', mapRoutes);
+console.log('🔗 Map routes mounted at root path');
 
 // Debug: Log all registered routes (development only)
 if (process.env.NODE_ENV !== 'production') {
