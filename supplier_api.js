@@ -212,10 +212,10 @@ async function getStationSlots(stationId, retryOnFailure = true) {
     // First attempt to get station info
     let stationInfo = await getStationInfoFromRelink(stationId, token);
     
-    // If failed or unauthorized and retry is enabled, try refreshing token and retrying
-    const needsTokenRefresh = !stationInfo || (stationInfo.error === 'unauthorized');
-    if (needsTokenRefresh && retryOnFailure) {
-      console.log(`⚠️ Failed to get station info for ${stationId}${stationInfo?.error === 'unauthorized' ? ' (unauthorized)' : ''}, refreshing token and retrying...`);
+    // Only refresh token if the API call specifically failed due to authentication (401/403)
+    // For other errors (network, 404, 500, etc.), don't refresh token
+    if (stationInfo && stationInfo.error === 'unauthorized' && retryOnFailure) {
+      console.log(`⚠️ Relink API returned unauthorized for ${stationId}, refreshing token and retrying...`);
       token = await refreshToken();
       
       if (token) {
