@@ -79,12 +79,43 @@ async function getTokenFromDatabase() {
 }
 
 /**
+ * Helper function to refresh token by calling the token endpoint
+ * @returns {Promise<string|null>} - Returns the new token or null if refresh failed
+ */
+async function refreshToken() {
+  try {
+    console.log('🔄 Token expired, refreshing token...');
+    const response = await fetch('https://api.cuub.tech/token', {
+      method: 'GET'
+    });
+
+    if (!response.ok) {
+      console.error(`Token refresh failed: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.success && data.token) {
+      console.log('✅ Token refreshed successfully');
+      return data.token;
+    }
+    
+    console.error('Token refresh response missing token:', data);
+    return null;
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return null;
+  }
+}
+
+/**
  * Helper function to fetch battery availability from Relink API
  * @param {string} stationId - The station ID
  * @param {string} token - The authorization token
+ * @param {boolean} isRetry - Whether this is a retry after token refresh
  * @returns {Promise<{filled_slots: number, open_slots: number}>}
  */
-async function getBatteryAvailability(stationId, token) {
+async function getBatteryAvailability(stationId, token, isRetry = false) {
   try {
     const url = `https://backend.energo.vip/api/cabinet?cabinetId=${stationId}`;
     const response = await fetch(url, {
@@ -96,8 +127,39 @@ async function getBatteryAvailability(stationId, token) {
       }
     });
 
+    // If request fails and we haven't retried yet, refresh token and retry
+    if (!response.ok && !isRetry) {
+      console.log(`⚠️ Relink API error for station ${stationId}: ${response.status} ${response.statusText}. Attempting token refresh...`);
+      
+      // Refresh the token
+      const newToken = await refreshToken();
+      
+      if (newToken) {
+        // Update token in database
+        let dbClient;
+        try {
+          dbClient = await pool.connect();
+          await dbClient.query('DELETE FROM token');
+          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
+          console.log('✅ Updated token in database');
+        } catch (dbError) {
+          console.error('Error updating token in database:', dbError);
+        } finally {
+          if (dbClient) {
+            dbClient.release();
+          }
+        }
+        
+        // Retry the request with new token
+        return getBatteryAvailability(stationId, newToken, true);
+      } else {
+        console.error(`Failed to refresh token for station ${stationId}`);
+        return { filled_slots: null, open_slots: null };
+      }
+    }
+
     if (!response.ok) {
-      console.error(`Relink API error for station ${stationId}: ${response.status} ${response.statusText}`);
+      console.error(`Relink API error for station ${stationId} (after retry): ${response.status} ${response.statusText}`);
       return { filled_slots: null, open_slots: null };
     }
 
@@ -114,6 +176,33 @@ async function getBatteryAvailability(stationId, token) {
     
     return { filled_slots: null, open_slots: null };
   } catch (error) {
+    // If it's a network/API error and we haven't retried, try refreshing token
+    if (!isRetry && (error.message?.includes('fetch') || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
+      console.log(`⚠️ Network error for station ${stationId}. Attempting token refresh...`);
+      
+      const newToken = await refreshToken();
+      
+      if (newToken) {
+        // Update token in database
+        let dbClient;
+        try {
+          dbClient = await pool.connect();
+          await dbClient.query('DELETE FROM token');
+          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
+          console.log('✅ Updated token in database');
+        } catch (dbError) {
+          console.error('Error updating token in database:', dbError);
+        } finally {
+          if (dbClient) {
+            dbClient.release();
+          }
+        }
+        
+        // Retry the request with new token
+        return getBatteryAvailability(stationId, newToken, true);
+      }
+    }
+    
     console.error(`Error fetching battery availability for station ${stationId}:`, error);
     return { filled_slots: null, open_slots: null };
   }
