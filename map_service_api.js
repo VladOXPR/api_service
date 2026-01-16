@@ -2,14 +2,18 @@ const express = require('express');
 const { Pool } = require('pg');
 const path = require('path');
 
-// Load environment variables
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-require('dotenv').config({ path: path.join(__dirname, '.env.local') });
+// Add fetch for HTTP requests
+let fetch;
+if (typeof globalThis.fetch === 'undefined') {
+  fetch = require('node-fetch');
+} else {
+  fetch = globalThis.fetch;
+}
 
 const router = express.Router();
 router.use(express.json());
 
-// Database configuration (reusing same connection config as user service)
+// Database configuration
 const CLOUD_SQL_CONNECTION_NAME = process.env.CLOUD_SQL_CONNECTION_NAME || 'keyextract-482721:us-central1:cuub-db';
 const DB_USER = process.env.DB_USER || 'postgres';
 const DB_PASS = process.env.DB_PASS || '1Cuubllc!';
@@ -53,6 +57,69 @@ pool.on('error', (err) => {
 });
 
 /**
+ * Helper function to get token from database
+ */
+async function getTokenFromDatabase() {
+  let client;
+  try {
+    client = await pool.connect();
+    const result = await client.query('SELECT value FROM token LIMIT 1');
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return result.rows[0].value;
+  } catch (error) {
+    console.error('Error fetching token from database:', error);
+    return null;
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+/**
+ * Helper function to fetch battery availability from Relink API
+ * @param {string} stationId - The station ID
+ * @param {string} token - The authorization token
+ * @returns {Promise<{filled_slots: number, open_slots: number}>}
+ */
+async function getBatteryAvailability(stationId, token) {
+  try {
+    const url = `https://backend.energo.vip/api/cabinet?cabinetId=${stationId}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Referer': 'https://backend.energo.vip/device/list',
+        'oid': '3526'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`Relink API error for station ${stationId}: ${response.status} ${response.statusText}`);
+      return { filled_slots: null, open_slots: null };
+    }
+
+    const data = await response.json();
+    
+    // Extract data from the response
+    if (data.content && data.content.length > 0 && data.content[0].positionInfo) {
+      const positionInfo = data.content[0].positionInfo;
+      return {
+        filled_slots: positionInfo.borrowNum || 0,  // borrowNum = slots with batteries
+        open_slots: positionInfo.returnNum || 0      // returnNum = empty slots
+      };
+    }
+    
+    return { filled_slots: null, open_slots: null };
+  } catch (error) {
+    console.error(`Error fetching battery availability for station ${stationId}:`, error);
+    return { filled_slots: null, open_slots: null };
+  }
+}
+
+/**
  * GET /stations
  * Fetch a list of all stations
  */
@@ -60,15 +127,41 @@ router.get('/stations', async (req, res) => {
   console.log('GET /stations endpoint called');
   let client;
   try {
+    // Get token from database
+    const token = await getTokenFromDatabase();
+    if (!token) {
+      console.warn('⚠️ No token found in database for Relink API calls');
+    }
+    
     client = await pool.connect();
     const result = await client.query(
       'SELECT id, title, latitude, longitude, updated_at FROM stations ORDER BY updated_at DESC'
     );
     
+    // Enrich each station with battery availability data
+    const stationsWithBatteryInfo = await Promise.all(
+      result.rows.map(async (station) => {
+        if (token) {
+          const batteryInfo = await getBatteryAvailability(station.id, token);
+          return {
+            ...station,
+            filled_slots: batteryInfo.filled_slots,
+            open_slots: batteryInfo.open_slots
+          };
+        } else {
+          return {
+            ...station,
+            filled_slots: null,
+            open_slots: null
+          };
+        }
+      })
+    );
+    
     res.json({
       success: true,
-      data: result.rows,
-      count: result.rows.length
+      data: stationsWithBatteryInfo,
+      count: stationsWithBatteryInfo.length
     });
   } catch (error) {
     console.error('Error fetching stations:', error);
@@ -117,6 +210,9 @@ router.get('/stations/:id', async (req, res) => {
       });
     }
     
+    // Get token from database
+    const token = await getTokenFromDatabase();
+    
     client = await pool.connect();
     const result = await client.query(
       'SELECT id, title, latitude, longitude, updated_at FROM stations WHERE id = $1',
@@ -130,9 +226,26 @@ router.get('/stations/:id', async (req, res) => {
       });
     }
     
+    // Enrich station with battery availability data
+    let station = result.rows[0];
+    if (token) {
+      const batteryInfo = await getBatteryAvailability(id, token);
+      station = {
+        ...station,
+        filled_slots: batteryInfo.filled_slots,
+        open_slots: batteryInfo.open_slots
+      };
+    } else {
+      station = {
+        ...station,
+        filled_slots: null,
+        open_slots: null
+      };
+    }
+    
     res.json({
       success: true,
-      data: result.rows[0]
+      data: station
     });
   } catch (error) {
     console.error('Error fetching station:', error);
