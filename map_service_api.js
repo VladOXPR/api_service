@@ -1,6 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const path = require('path');
+const { getStationSlots } = require('./supplier_api');
 
 // Load environment variables
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -54,7 +55,7 @@ pool.on('error', (err) => {
 
 /**
  * GET /stations
- * Fetch a list of all stations
+ * Fetch a list of all stations with Open Slots and Filled Slots
  */
 router.get('/stations', async (req, res) => {
   console.log('GET /stations endpoint called');
@@ -65,10 +66,27 @@ router.get('/stations', async (req, res) => {
       'SELECT id, title, latitude, longitude, updated_at FROM stations ORDER BY updated_at DESC'
     );
     
+    // Fetch slot information for each station from Relink API
+    const stationsWithSlots = await Promise.all(
+      result.rows.map(async (station) => {
+        const slots = await getStationSlots(station.id);
+        
+        return {
+          id: station.id,
+          title: station.title,
+          latitude: station.latitude.toString(),
+          longitude: station.longitude.toString(),
+          updated_at: station.updated_at,
+          'Open Slots': slots ? slots.openSlots.toString() : '0',
+          'Filled Slots': slots ? slots.filledSlots.toString() : '0'
+        };
+      })
+    );
+    
     res.json({
       success: true,
-      data: result.rows,
-      count: result.rows.length
+      data: stationsWithSlots,
+      count: stationsWithSlots.length
     });
   } catch (error) {
     console.error('Error fetching stations:', error);
@@ -102,7 +120,7 @@ router.get('/stations', async (req, res) => {
 
 /**
  * GET /stations/:id
- * Fetch single station data by id
+ * Fetch single station data by id with Open Slots and Filled Slots
  */
 router.get('/stations/:id', async (req, res) => {
   let client;
@@ -130,9 +148,25 @@ router.get('/stations/:id', async (req, res) => {
       });
     }
     
+    const station = result.rows[0];
+    
+    // Fetch slot information from Relink API
+    const slots = await getStationSlots(station.id);
+    
+    // Format response with Open Slots and Filled Slots
+    const stationData = {
+      id: station.id,
+      title: station.title,
+      latitude: station.latitude.toString(),
+      longitude: station.longitude.toString(),
+      updated_at: station.updated_at,
+      'Open Slots': slots ? slots.openSlots.toString() : '0',
+      'Filled Slots': slots ? slots.filledSlots.toString() : '0'
+    };
+    
     res.json({
       success: true,
-      data: result.rows[0]
+      data: stationData
     });
   } catch (error) {
     console.error('Error fetching station:', error);
