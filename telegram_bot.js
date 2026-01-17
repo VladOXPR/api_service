@@ -97,18 +97,115 @@ async function fetchStations() {
 }
 
 /**
+ * Generate Apple Maps route link with only red stations (low stock) as stops
+ * Red stations are those with 0, 1, or 2 filled slots
+ * @param {Array} stations - Array of station objects with latitude/longitude
+ * @returns {string} - Apple Maps URL with red stations as route stops
+ */
+function generateRouteLink(stations) {
+  if (!stations || stations.length === 0) {
+    return null;
+  }
+  
+  // Filter for red stations (0, 1, or 2 filled slots) with valid coordinates
+  const redStations = stations.filter(station => {
+    // Must have valid coordinates
+    if (!station.latitude || !station.longitude) {
+      return false;
+    }
+    
+    // Check if it's a red station (0, 1, or 2 filled slots)
+    const filledSlots = station.filled_slots;
+    if (filledSlots === null || filledSlots === undefined || filledSlots === 'N/A') {
+      return false;
+    }
+    
+    // Convert to number if it's a string
+    const filledSlotsNum = typeof filledSlots === 'string' ? parseInt(filledSlots, 10) : filledSlots;
+    
+    // Red stations are those with 0, 1, or 2 filled slots
+    return !isNaN(filledSlotsNum) && filledSlotsNum <= 2;
+  });
+  
+  if (redStations.length === 0) {
+    return null;
+  }
+  
+  // Apple Maps supports multiple destinations by repeating daddr parameter
+  // Format: http://maps.apple.com/?daddr=lat1,lon1&daddr=lat2,lon2&daddr=lat3,lon3
+  const destinations = redStations
+    .map(station => `daddr=${station.latitude},${station.longitude}`)
+    .join('&');
+  
+  return `http://maps.apple.com/?${destinations}`;
+}
+
+/**
  * Format station status message
  * @param {Array} stations - Array of station objects
  * @returns {string} - Formatted message text
  */
+/**
+ * Get station priority for sorting (lower number = higher priority)
+ * Red (0,1,2 slots) = 1, Yellow (3 slots) = 2, Green (4,5 slots) = 3
+ */
+function getStationPriority(station) {
+  const filledSlots = station.filled_slots;
+  if (filledSlots === null || filledSlots === undefined || filledSlots === 'N/A') {
+    return 4; // Unknown/N/A stations go last
+  }
+  
+  const filledSlotsNum = typeof filledSlots === 'string' ? parseInt(filledSlots, 10) : filledSlots;
+  
+  if (isNaN(filledSlotsNum)) {
+    return 4;
+  }
+  
+  if (filledSlotsNum >= 4) {
+    return 3; // Green - lowest priority
+  } else if (filledSlotsNum === 3) {
+    return 2; // Yellow - medium priority
+  } else if (filledSlotsNum <= 2) {
+    return 1; // Red - highest priority
+  }
+  
+  return 4; // Default
+}
+
 function formatStationStatus(stations) {
   if (!stations || stations.length === 0) {
     return 'No stations found.';
   }
   
-  let message = `📊 Station Status Report (${stations.length} stations)\n\n`;
+  // Filter to only include red and yellow stations (exclude green stations)
+  const redYellowStations = stations.filter(station => {
+    const filledSlots = station.filled_slots;
+    if (filledSlots === null || filledSlots === undefined || filledSlots === 'N/A') {
+      return true; // Include stations with unknown status
+    }
+    
+    const filledSlotsNum = typeof filledSlots === 'string' ? parseInt(filledSlots, 10) : filledSlots;
+    
+    if (isNaN(filledSlotsNum)) {
+      return true; // Include stations with invalid numbers
+    }
+    
+    // Only include red (0-2) and yellow (3) stations, exclude green (4-5)
+    return filledSlotsNum <= 3;
+  });
   
-  stations.forEach((station, index) => {
+  if (redYellowStations.length === 0) {
+    return 'Network is healthy!';
+  }
+  
+  // Sort stations: Red first, then Yellow
+  const sortedStations = [...redYellowStations].sort((a, b) => {
+    return getStationPriority(a) - getStationPriority(b);
+  });
+  
+  let message = `📊 Station Status Report - Red & Yellow Stations (${sortedStations.length} of ${stations.length} total)\n\n`;
+  
+  sortedStations.forEach((station, index) => {
     const title = station.title || 'Unknown';
     const filledSlots = station.filled_slots !== null && station.filled_slots !== undefined 
       ? station.filled_slots 
@@ -146,6 +243,20 @@ function formatStationStatus(stations) {
     message += `   📦 Open Slots: ${openSlots}\n`;
     message += `   🗺️  Directions: ${mapLink}\n\n`;
   });
+  
+  // Add route link with only red stations (low stock)
+  const routeLink = generateRouteLink(stations);
+  if (routeLink) {
+    const redStationCount = stations.filter(station => {
+      const filledSlots = station.filled_slots;
+      if (filledSlots === null || filledSlots === undefined || filledSlots === 'N/A') {
+        return false;
+      }
+      const filledSlotsNum = typeof filledSlots === 'string' ? parseInt(filledSlots, 10) : filledSlots;
+      return !isNaN(filledSlotsNum) && filledSlotsNum <= 2;
+    }).length;
+    message += `\n🗺️  Route with red stations (${redStationCount} stops): ${routeLink}\n`;
+  }
   
   return message;
 }
@@ -238,6 +349,7 @@ module.exports = {
   sendStationStatus,
   fetchStations,
   formatStationStatus,
+  generateRouteLink,
   getUpdates,
   getChatId
 };
