@@ -9,8 +9,8 @@ console.log('📋 PORT:', process.env.PORT || '8080 (default)');
 
 // Load environment variables FIRST (before loading routes that need them)
 try {
-  require('dotenv').config({ path: path.join(__dirname, '.env') });
-  require('dotenv').config({ path: path.join(__dirname, '.env.local') });
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '.env.local') });
   console.log('✅ Environment variables loaded');
 } catch (error) {
   console.warn('⚠️ Error loading .env files (may not exist):', error.message);
@@ -133,7 +133,7 @@ try {
         process.exit(1);
     });
 
-    // Handle process errors
+        // Handle process errors
     process.on('uncaughtException', (error) => {
         console.error('❌ Uncaught Exception:', error);
         process.exit(1);
@@ -148,5 +148,76 @@ try {
     console.error('Error stack:', error.stack);
     process.exit(1);
 }
+
+// ========================================
+// AUTOMATIC TOKEN REFRESH SCHEDULER
+// ========================================
+
+// Add fetch for HTTP requests
+let fetch;
+if (typeof globalThis.fetch === 'undefined') {
+  fetch = require('node-fetch');
+} else {
+  fetch = globalThis.fetch;
+}
+
+/**
+ * Call the token endpoint to refresh the token
+ */
+async function refreshTokenAutomatically() {
+  try {
+    console.log('🔄 Automatic token refresh triggered...');
+    const response = await fetch('https://api.cuub.tech/token', {
+      method: 'GET'
+    });
+
+    if (!response.ok) {
+      console.error(`⚠️ Automatic token refresh failed: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    const data = await response.json();
+    if (data.success && data.token) {
+      console.log('✅ Automatic token refresh successful');
+      return true;
+    }
+    
+    console.error('⚠️ Automatic token refresh response missing token:', data);
+    return false;
+  } catch (error) {
+    console.error('❌ Error during automatic token refresh:', error.message);
+    return false;
+  }
+}
+
+/**
+ * Schedule the next automatic token refresh
+ * Uses random interval between 30 minutes and 2 hours
+ */
+function scheduleNextTokenRefresh() {
+  // Random interval between 30 minutes (1,800,000 ms) and 2 hours (7,200,000 ms)
+  const minInterval = 30 * 60 * 1000; // 30 minutes in milliseconds
+  const maxInterval = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+  const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
+  
+  const hours = Math.floor(randomInterval / (60 * 60 * 1000));
+  const minutes = Math.floor((randomInterval % (60 * 60 * 1000)) / (60 * 1000));
+  
+  console.log(`⏰ Next automatic token refresh scheduled in ${hours}h ${minutes}m (${Math.round(randomInterval / 1000 / 60)} minutes)`);
+  
+  setTimeout(async () => {
+    await refreshTokenAutomatically();
+    scheduleNextTokenRefresh(); // Schedule the next one
+  }, randomInterval);
+}
+
+// Start the automatic token refresh scheduler
+// Wait a bit after server starts before the first refresh
+setTimeout(() => {
+  console.log('🚀 Starting automatic token refresh scheduler...');
+  refreshTokenAutomatically().then(() => {
+    scheduleNextTokenRefresh();
+  });
+}, 60000); // Wait 1 minute after server starts
 
 module.exports = app;
