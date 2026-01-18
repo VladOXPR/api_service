@@ -135,6 +135,111 @@ async function refreshToken() {
 }
 
 /**
+ * Helper function to fetch order data from Relink API (including orderNo for scan endpoints)
+ * @param {string} manufactureId - The manufacture ID (deviceid)
+ * @param {string} token - The authorization token
+ * @param {boolean} isRetry - Whether this is a retry after token refresh
+ * @returns {Promise<{starttime: number|null, returnTime: number|null, orderNo: string|null}>}
+ */
+async function getOrderDataForScan(manufactureId, token, isRetry = false) {
+  try {
+    const url = `https://backend.energo.vip/api/order?size=0&sort=id%2Cdesc&deviceid=${manufactureId}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Referer': 'https://backend.energo.vip/order/lease-order',
+        'oid': '3526'
+      }
+    });
+
+    // If request fails and we haven't retried yet, refresh token and retry
+    if (!response.ok && !isRetry) {
+      console.log(`⚠️ Relink API error for device ${manufactureId}: ${response.status} ${response.statusText}. Attempting token refresh...`);
+      
+      // Refresh the token
+      const newToken = await refreshToken();
+      
+      if (newToken) {
+        // Update token in database
+        let dbClient;
+        try {
+          dbClient = await pool.connect();
+          await dbClient.query('DELETE FROM token');
+          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
+          console.log('✅ Updated token in database');
+        } catch (dbError) {
+          console.error('Error updating token in database:', dbError);
+        } finally {
+          if (dbClient) {
+            dbClient.release();
+          }
+        }
+        
+        // Retry the request with new token
+        return getOrderDataForScan(manufactureId, newToken, true);
+      } else {
+        console.error(`Failed to refresh token for device ${manufactureId}`);
+        return { starttime: null, returnTime: null, orderNo: null };
+      }
+    }
+
+    if (!response.ok) {
+      console.error(`Relink API error for device ${manufactureId} (after retry): ${response.status} ${response.statusText}`);
+      return { starttime: null, returnTime: null, orderNo: null };
+    }
+
+    const data = await response.json();
+    
+    // Extract data from the response
+    // Looking for the first order in the content array
+    if (data.content && data.content.length > 0) {
+      const order = data.content[0];
+      // Use endtime as returnTime if returnTime is 0 or missing
+      const returnTimeValue = (order.returnTime && order.returnTime !== 0) ? order.returnTime : order.endtime;
+      
+      return {
+        starttime: order.starttime || null,
+        returnTime: returnTimeValue || null,
+        orderNo: order.orderNo || null
+      };
+    }
+    
+    return { starttime: null, returnTime: null, orderNo: null };
+  } catch (error) {
+    // If it's a network/API error and we haven't retried, try refreshing token
+    if (!isRetry && (error.message?.includes('fetch') || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
+      console.log(`⚠️ Network error for device ${manufactureId}. Attempting token refresh...`);
+      
+      const newToken = await refreshToken();
+      
+      if (newToken) {
+        // Update token in database
+        let dbClient;
+        try {
+          dbClient = await pool.connect();
+          await dbClient.query('DELETE FROM token');
+          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
+          console.log('✅ Updated token in database');
+        } catch (dbError) {
+          console.error('Error updating token in database:', dbError);
+        } finally {
+          if (dbClient) {
+            dbClient.release();
+          }
+        }
+        
+        // Retry the request with new token
+        return getOrderDataForScan(manufactureId, newToken, true);
+      }
+    }
+    
+    console.error(`Error fetching order data for device ${manufactureId}:`, error);
+    return { starttime: null, returnTime: null, orderNo: null };
+  }
+}
+
+/**
  * Helper function to fetch order data from Relink API
  * @param {string} manufactureId - The manufacture ID (deviceid)
  * @param {string} token - The authorization token
@@ -425,6 +530,319 @@ router.get('/battery/:sticker_id', async (req, res) => {
         code: error.code,
         connectionName: CLOUD_SQL_CONNECTION_NAME
       } : undefined
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+/**
+ * POST /battery/:sticker_id
+ * Create a scan record
+ * Headers: manufacture_id, sticker_type
+ * Body: session_length (default: 0)
+ */
+router.post('/battery/:sticker_id', async (req, res) => {
+  console.log(`POST /battery/${req.params.sticker_id} endpoint called`);
+  let client;
+  try {
+    const { sticker_id } = req.params;
+    const manufacture_id = req.headers['manufacture_id'];
+    const sticker_type = req.headers['sticker_type'];
+    const session_length = req.body?.session_length || 0;
+
+    // Validate required fields
+    if (!sticker_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'sticker_id is required'
+      });
+    }
+
+    if (!manufacture_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'manufacture_id header is required'
+      });
+    }
+
+    if (!sticker_type) {
+      return res.status(400).json({
+        success: false,
+        error: 'sticker_type header is required'
+      });
+    }
+
+    // Get token from database
+    const token = await getTokenFromDatabase();
+    if (!token) {
+      console.warn('⚠️ No token found in database for Relink API calls');
+      return res.status(503).json({
+        success: false,
+        error: 'Token not available. Please ensure token is set in database.'
+      });
+    }
+
+    // Fetch order data from Relink API
+    const orderData = await getOrderDataForScan(manufacture_id, token);
+    const order_id = orderData.orderNo || null;
+
+    // Calculate duration_after_rent: current time - starttime
+    let duration_after_rent = null;
+    if (orderData.starttime) {
+      const starttimeMs = Number(orderData.starttime);
+      const currentTimeMs = Date.now();
+      const durationMs = currentTimeMs - starttimeMs;
+      
+      // Convert milliseconds to PostgreSQL interval format (HH:MM:SS)
+      if (durationMs > 0) {
+        const totalSeconds = Math.floor(durationMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        duration_after_rent = `${hours}:${minutes}:${seconds}`;
+      }
+    }
+
+    // Convert session_length to PostgreSQL interval format if it's a number (seconds)
+    let session_length_interval = null;
+    if (session_length && session_length > 0) {
+      const totalSeconds = Math.floor(session_length);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      session_length_interval = `${hours}:${minutes}:${seconds}`;
+    } else {
+      session_length_interval = '0';
+    }
+
+    // Insert scan record into database
+    client = await pool.connect();
+    const insertQuery = `
+      INSERT INTO scans (sticker_id, order_id, session_length, sticker_type, duration_after_rent)
+      VALUES ($1, $2, $3::interval, $4, $5::interval)
+      RETURNING scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent
+    `;
+    
+    const result = await client.query(insertQuery, [
+      sticker_id,
+      order_id,
+      session_length_interval,
+      sticker_type,
+      duration_after_rent
+    ]);
+
+    const scanRecord = result.rows[0];
+
+    res.status(201).json({
+      success: true,
+      data: scanRecord
+    });
+  } catch (error) {
+    console.error('Error creating scan record:', error);
+    
+    let errorMessage = error.message || 'Failed to create scan record';
+    let statusCode = 500;
+    
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      errorMessage = 'Database connection refused. Please ensure: 1) Cloud SQL instance is added to Cloud Run service connections, 2) Service account has Cloud SQL Client role, 3) Cloud SQL Admin API is enabled.';
+      statusCode = 503;
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+/**
+ * PATCH /battery/:sticker_id
+ * Update a scan record (most recent scan for the sticker_id)
+ * Headers: manufacture_id, sticker_type (optional), session_length (optional)
+ */
+router.patch('/battery/:sticker_id', async (req, res) => {
+  console.log(`PATCH /battery/${req.params.sticker_id} endpoint called`);
+  let client;
+  try {
+    const { sticker_id } = req.params;
+    const manufacture_id = req.headers['manufacture_id'];
+    const sticker_type = req.headers['sticker_type'];
+    const session_length = req.headers['session_length'];
+
+    if (!sticker_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'sticker_id is required'
+      });
+    }
+
+    if (!manufacture_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'manufacture_id header is required'
+      });
+    }
+
+    // Get token from database
+    const token = await getTokenFromDatabase();
+    if (!token) {
+      console.warn('⚠️ No token found in database for Relink API calls');
+      return res.status(503).json({
+        success: false,
+        error: 'Token not available. Please ensure token is set in database.'
+      });
+    }
+
+    // Build update fields
+    const updateFields = [];
+    const updateValues = [];
+    let paramIndex = 1;
+
+    if (sticker_type) {
+      updateFields.push(`sticker_type = $${paramIndex++}`);
+      updateValues.push(sticker_type);
+    }
+
+    if (session_length !== undefined) {
+      // Convert session_length to PostgreSQL interval format
+      let session_length_interval = null;
+      if (session_length && session_length > 0) {
+        const totalSeconds = Math.floor(Number(session_length));
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        session_length_interval = `${hours}:${minutes}:${seconds}`;
+      } else {
+        session_length_interval = '0';
+      }
+      updateFields.push(`session_length = $${paramIndex++}::interval`);
+      updateValues.push(session_length_interval);
+    }
+
+    // Fetch order data from Relink API to update order_id and duration_after_rent
+    const orderData = await getOrderDataForScan(manufacture_id, token);
+    
+    if (orderData.orderNo) {
+      updateFields.push(`order_id = $${paramIndex++}`);
+      updateValues.push(orderData.orderNo);
+    }
+
+    if (orderData.starttime) {
+      const starttimeMs = Number(orderData.starttime);
+      const currentTimeMs = Date.now();
+      const durationMs = currentTimeMs - starttimeMs;
+      
+      if (durationMs > 0) {
+        const totalSeconds = Math.floor(durationMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const duration_after_rent = `${hours}:${minutes}:${seconds}`;
+        updateFields.push(`duration_after_rent = $${paramIndex++}::interval`);
+        updateValues.push(duration_after_rent);
+      }
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No fields to update. Provide at least one of: sticker_type, session_length, or ensure manufacture_id is valid.'
+      });
+    }
+
+    // Get the most recent scan for this sticker_id
+    client = await pool.connect();
+    
+    // First, check if a scan exists and get the scan_id
+    const checkQuery = 'SELECT scan_id FROM scans WHERE sticker_id = $1 ORDER BY scan_time DESC LIMIT 1';
+    const checkResult = await client.query(checkQuery, [sticker_id]);
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `No scan record found for sticker_id "${sticker_id}"`
+      });
+    }
+
+    const scan_id = checkResult.rows[0].scan_id;
+
+    // Update the most recent scan using scan_id
+    updateValues.push(scan_id);
+    const updateQuery = `
+      UPDATE scans
+      SET ${updateFields.join(', ')}
+      WHERE scan_id = $${paramIndex}
+      RETURNING scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent
+    `;
+
+    const result = await client.query(updateQuery, updateValues);
+    const scanRecord = result.rows[0];
+
+    res.json({
+      success: true,
+      data: scanRecord
+    });
+  } catch (error) {
+    console.error('Error updating scan record:', error);
+    
+    let errorMessage = error.message || 'Failed to update scan record';
+    let statusCode = 500;
+    
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      errorMessage = 'Database connection refused. Please ensure: 1) Cloud SQL instance is added to Cloud Run service connections, 2) Service account has Cloud SQL Client role, 3) Cloud SQL Admin API is enabled.';
+      statusCode = 503;
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+/**
+ * GET /scans
+ * Get all scan records
+ */
+router.get('/scans', async (req, res) => {
+  console.log('GET /scans endpoint called');
+  let client;
+  try {
+    client = await pool.connect();
+    const result = await client.query(
+      'SELECT scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent FROM scans ORDER BY scan_time DESC'
+    );
+
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching scan records:', error);
+    
+    let errorMessage = error.message || 'Failed to fetch scan records';
+    let statusCode = 500;
+    
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      errorMessage = 'Database connection refused. Please ensure: 1) Cloud SQL instance is added to Cloud Run service connections, 2) Service account has Cloud SQL Client role, 3) Cloud SQL Admin API is enabled.';
+      statusCode = 503;
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage
     });
   } finally {
     if (client) {
