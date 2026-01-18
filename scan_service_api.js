@@ -367,6 +367,62 @@ function formatDuration(milliseconds) {
 }
 
 /**
+ * Helper function to format interval string to HH:MM:SS format
+ * Handles PostgreSQL interval formats like "HH:MM:SS", "1 day 02:03:04", "0", etc.
+ * @param {string|number|null} interval - Interval string from PostgreSQL or seconds
+ * @returns {string|null} - Formatted duration as HH:MM:SS or null
+ */
+function formatIntervalToHHMMSS(interval) {
+  if (!interval && interval !== 0) {
+    return null;
+  }
+
+  // If it's already a number (seconds), convert directly
+  if (typeof interval === 'number') {
+    const totalSeconds = Math.floor(interval);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  // If it's a string, parse it
+  const intervalStr = String(interval).trim();
+  
+  // Handle "0" or empty-like values
+  if (intervalStr === '0' || intervalStr === '' || intervalStr === '00:00:00') {
+    return '00:00:00';
+  }
+  
+  // Handle formats like "1 day 02:03:04" - extract just the time part
+  const timeMatch = intervalStr.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const seconds = parseInt(timeMatch[3], 10);
+    
+    // If there's a "day" in the string, add 24 hours per day
+    const dayMatch = intervalStr.match(/(\d+)\s+day/);
+    if (dayMatch) {
+      hours += parseInt(dayMatch[1], 10) * 24;
+    }
+    
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  // If it's just "HH:MM:SS" format, ensure proper padding
+  const parts = intervalStr.split(':');
+  if (parts.length === 3) {
+    const hours = parseInt(parts[0], 10) || 0;
+    const minutes = parseInt(parts[1], 10) || 0;
+    const seconds = parseInt(parts[2], 10) || 0;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return null;
+}
+
+/**
  * Calculate duration in milliseconds based on startTime and returnTime
  * @param {number|null} startTime - Start time in epoch milliseconds
  * @param {number|null} returnTime - Return time in epoch milliseconds (null if not returned)
@@ -596,13 +652,9 @@ router.post('/battery/:sticker_id', async (req, res) => {
       const currentTimeMs = Date.now();
       const durationMs = currentTimeMs - starttimeMs;
       
-      // Convert milliseconds to PostgreSQL interval format (HH:MM:SS)
+      // Convert milliseconds to HH:MM:SS format with zero padding
       if (durationMs > 0) {
-        const totalSeconds = Math.floor(durationMs / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        duration_after_rent = `${hours}:${minutes}:${seconds}`;
+        duration_after_rent = formatDuration(durationMs);
       }
     }
 
@@ -610,12 +662,9 @@ router.post('/battery/:sticker_id', async (req, res) => {
     let session_length_interval = null;
     if (session_length && session_length > 0) {
       const totalSeconds = Math.floor(session_length);
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      session_length_interval = `${hours}:${minutes}:${seconds}`;
+      session_length_interval = formatDuration(totalSeconds * 1000);
     } else {
-      session_length_interval = '0';
+      session_length_interval = '00:00:00';
     }
 
     // Insert scan record into database
@@ -635,6 +684,14 @@ router.post('/battery/:sticker_id', async (req, res) => {
     ]);
 
     const scanRecord = result.rows[0];
+    
+    // Format intervals to HH:MM:SS format
+    if (scanRecord.duration_after_rent) {
+      scanRecord.duration_after_rent = formatIntervalToHHMMSS(scanRecord.duration_after_rent);
+    }
+    if (scanRecord.session_length) {
+      scanRecord.session_length = formatIntervalToHHMMSS(scanRecord.session_length);
+    }
 
     res.status(201).json({
       success: true,
@@ -715,12 +772,9 @@ router.patch('/battery/:sticker_id', async (req, res) => {
       let session_length_interval = null;
       if (session_length && session_length > 0) {
         const totalSeconds = Math.floor(Number(session_length));
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        session_length_interval = `${hours}:${minutes}:${seconds}`;
+        session_length_interval = formatDuration(totalSeconds * 1000);
       } else {
-        session_length_interval = '0';
+        session_length_interval = '00:00:00';
       }
       updateFields.push(`session_length = $${paramIndex++}::interval`);
       updateValues.push(session_length_interval);
@@ -740,11 +794,7 @@ router.patch('/battery/:sticker_id', async (req, res) => {
       const durationMs = currentTimeMs - starttimeMs;
       
       if (durationMs > 0) {
-        const totalSeconds = Math.floor(durationMs / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const duration_after_rent = `${hours}:${minutes}:${seconds}`;
+        const duration_after_rent = formatDuration(durationMs);
         updateFields.push(`duration_after_rent = $${paramIndex++}::interval`);
         updateValues.push(duration_after_rent);
       }
@@ -784,6 +834,14 @@ router.patch('/battery/:sticker_id', async (req, res) => {
 
     const result = await client.query(updateQuery, updateValues);
     const scanRecord = result.rows[0];
+    
+    // Format intervals to HH:MM:SS format
+    if (scanRecord.duration_after_rent) {
+      scanRecord.duration_after_rent = formatIntervalToHHMMSS(scanRecord.duration_after_rent);
+    }
+    if (scanRecord.session_length) {
+      scanRecord.session_length = formatIntervalToHHMMSS(scanRecord.session_length);
+    }
 
     res.json({
       success: true,
@@ -824,10 +882,17 @@ router.get('/scans', async (req, res) => {
       'SELECT scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent FROM scans ORDER BY scan_time DESC'
     );
 
+    // Format intervals to HH:MM:SS format for all records
+    const formattedRows = result.rows.map(row => ({
+      ...row,
+      duration_after_rent: formatIntervalToHHMMSS(row.duration_after_rent),
+      session_length: formatIntervalToHHMMSS(row.session_length)
+    }));
+
     res.json({
       success: true,
-      data: result.rows,
-      count: result.rows.length
+      data: formattedRows,
+      count: formattedRows.length
     });
   } catch (error) {
     console.error('Error fetching scan records:', error);
