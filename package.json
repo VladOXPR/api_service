@@ -8,6 +8,7 @@
     "test-login": "node token_extract.js"
   },
   "dependencies": {
+    "axios": "^1.13.2",
     "dotenv": "^16.3.1",
     "express": "^4.22.1",
     "node-fetch": "^2.7.0",

@@ -480,7 +480,7 @@ function startTelegramCommandPolling() {
                 }
               }
             }
-            // Handle /gay command (can be /gay or /gay@botname)
+            // Handle /gay command
             else if (messageText === '/gay' || messageText.startsWith('/gay@') || messageText.startsWith('/gay ')) {
               console.log(`📨 /gay command detected from chat: ${chatTitle} (${chatId})`);
               try {

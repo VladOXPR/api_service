@@ -2,10 +2,6 @@ const express = require('express');
 const { Pool } = require('pg');
 const path = require('path');
 
-// Load environment variables
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-require('dotenv').config({ path: path.join(__dirname, '.env.local') });
-
 const router = express.Router();
 router.use(express.json());
 
@@ -14,10 +10,6 @@ const CLOUD_SQL_CONNECTION_NAME = process.env.CLOUD_SQL_CONNECTION_NAME || 'keye
 const DB_USER = process.env.DB_USER || 'postgres';
 const DB_PASS = process.env.DB_PASS || '1Cuubllc!';
 const DB_NAME = process.env.DB_NAME || 'postgres';
-
-// Log the connection name being used
-console.log('📋 Cloud SQL Connection Name:', CLOUD_SQL_CONNECTION_NAME);
-console.log('📋 From environment variable:', process.env.CLOUD_SQL_CONNECTION_NAME ? 'YES' : 'NO (using default)');
 
 // Create connection pool
 // For Cloud SQL, use Unix socket when running on Cloud Run

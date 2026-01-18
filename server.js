@@ -239,7 +239,7 @@ setTimeout(() => {
   console.log('🚀 Starting automatic token refresh scheduler...');
   refreshTokenAutomatically().then(() => {
     scheduleNextTokenRefresh();
-  });
+    });
 }, 60000); // Wait 1 minute after server starts
 
 // ========================================

@@ -251,6 +251,122 @@ curl -X DELETE https://api.cuub.tech/stations/station-001 | jq .
 
 ---
 
+---
+
+# CURL Examples for Scan Service API
+
+## POST /battery/:sticker_id - Create a scan record
+
+### Basic example (with default session_length = 0)
+```bash
+curl -X POST https://api.cuub.tech/battery/A201 \
+  -H "Content-Type: application/json" \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: QR_CODE" \
+  -d '{}'
+```
+
+### Create scan with session_length
+```bash
+curl -X POST https://api.cuub.tech/battery/A201 \
+  -H "Content-Type: application/json" \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: QR_CODE" \
+  -d '{
+    "session_length": 3600
+  }'
+```
+
+### Create scan with session_length (2 hours)
+```bash
+curl -X POST https://api.cuub.tech/battery/A201 \
+  -H "Content-Type: application/json" \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: NFC" \
+  -d '{
+    "session_length": 7200
+  }'
+```
+
+### Pretty-print response (with jq)
+```bash
+curl -X POST https://api.cuub.tech/battery/A201 \
+  -H "Content-Type: application/json" \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: QR_CODE" \
+  -d '{
+    "session_length": 1800
+  }' | jq .
+```
+
+---
+
+## PATCH /battery/:sticker_id - Update a scan record
+
+### Update with manufacture_id only (refreshes order_id and duration_after_rent)
+```bash
+curl -X PATCH https://api.cuub.tech/battery/A201 \
+  -H "manufacture_id: CUBH5A000513"
+```
+
+### Update sticker_type
+```bash
+curl -X PATCH https://api.cuub.tech/battery/A201 \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: NFC"
+```
+
+### Update session_length
+```bash
+curl -X PATCH https://api.cuub.tech/battery/A201 \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "session_length: 5400"
+```
+
+### Update multiple fields
+```bash
+curl -X PATCH https://api.cuub.tech/battery/A201 \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: QR_CODE" \
+  -H "session_length: 3600"
+```
+
+### Pretty-print response (with jq)
+```bash
+curl -X PATCH https://api.cuub.tech/battery/A201 \
+  -H "manufacture_id: CUBH5A000513" \
+  -H "sticker_type: NFC" \
+  -H "session_length: 7200" | jq .
+```
+
+---
+
+## GET /scans - List all scan records
+
+```bash
+curl https://api.cuub.tech/scans
+```
+
+### Pretty-print response
+```bash
+curl https://api.cuub.tech/scans | jq .
+```
+
+---
+
+## GET /battery/:sticker_id - Get battery information by sticker_id
+
+```bash
+curl https://api.cuub.tech/battery/A201
+```
+
+### Pretty-print response
+```bash
+curl https://api.cuub.tech/battery/A201 | jq .
+```
+
+---
+
 ## Notes
 
 ### User Service API
@@ -267,4 +383,20 @@ curl -X DELETE https://api.cuub.tech/stations/station-001 | jq .
 - `latitude` must be between -90 and 90
 - `longitude` must be between -180 and 180
 - `updated_at` is automatically set/updated by the database
+
+### Scan Service API
+- All endpoints return JSON responses
+- POST `/battery/:sticker_id`:
+  - Required headers: `manufacture_id`, `sticker_type`
+  - Optional body field: `session_length` (defaults to 0, in seconds)
+  - Automatically fetches `order_id` and calculates `duration_after_rent` from Relink API
+- PATCH `/battery/:sticker_id`:
+  - Required header: `manufacture_id`
+  - Optional headers: `sticker_type`, `session_length` (in seconds)
+  - Updates the most recent scan record for the given `sticker_id`
+  - Automatically refreshes `order_id` and `duration_after_rent` from Relink API
+- GET `/scans`:
+  - Returns all scan records ordered by `scan_time` (descending)
+- GET `/battery/:sticker_id`:
+  - Returns battery information including `duration` and `amountPaid`
 
