@@ -647,15 +647,27 @@ router.post('/battery/:sticker_id', async (req, res) => {
 
     // Calculate duration_after_rent: current time - starttime
     let duration_after_rent = null;
-    if (orderData.starttime) {
+    if (orderData.starttime !== null && orderData.starttime !== undefined) {
       const starttimeMs = Number(orderData.starttime);
-      const currentTimeMs = Date.now();
-      const durationMs = currentTimeMs - starttimeMs;
-      
-      // Convert milliseconds to HH:MM:SS format with zero padding
-      if (durationMs > 0) {
-        duration_after_rent = formatDuration(durationMs);
+      // Only calculate if starttime is a valid positive timestamp (after Jan 1, 2000)
+      // This avoids using invalid timestamps like 0 (Jan 1, 1970)
+      const minValidTimestamp = 946684800000; // Jan 1, 2000 00:00:00 UTC
+      if (starttimeMs > minValidTimestamp && !isNaN(starttimeMs)) {
+        const currentTimeMs = Date.now();
+        const durationMs = currentTimeMs - starttimeMs;
+        
+        // Convert milliseconds to HH:MM:SS format with zero padding
+        if (durationMs > 0) {
+          duration_after_rent = formatDuration(durationMs);
+        } else {
+          // If duration is negative or zero, set to 00:00:00
+          duration_after_rent = '00:00:00';
+        }
+      } else {
+        console.log(`⚠️ Invalid starttime for ${sticker_id}: ${orderData.starttime} (${starttimeMs})`);
       }
+    } else {
+      console.log(`⚠️ No starttime found in Relink API response for ${sticker_id}`);
     }
 
     // Convert session_length to PostgreSQL interval format if it's a number (seconds)
@@ -788,15 +800,26 @@ router.patch('/battery/:sticker_id', async (req, res) => {
       updateValues.push(orderData.orderNo);
     }
 
-    if (orderData.starttime) {
+    if (orderData.starttime !== null && orderData.starttime !== undefined) {
       const starttimeMs = Number(orderData.starttime);
-      const currentTimeMs = Date.now();
-      const durationMs = currentTimeMs - starttimeMs;
-      
-      if (durationMs > 0) {
-        const duration_after_rent = formatDuration(durationMs);
-        updateFields.push(`duration_after_rent = $${paramIndex++}::interval`);
-        updateValues.push(duration_after_rent);
+      // Only calculate if starttime is a valid positive timestamp (after Jan 1, 2000)
+      // This avoids using invalid timestamps like 0 (Jan 1, 1970)
+      const minValidTimestamp = 946684800000; // Jan 1, 2000 00:00:00 UTC
+      if (starttimeMs > minValidTimestamp && !isNaN(starttimeMs)) {
+        const currentTimeMs = Date.now();
+        const durationMs = currentTimeMs - starttimeMs;
+        
+        // Convert milliseconds to HH:MM:SS format with zero padding
+        if (durationMs > 0) {
+          const duration_after_rent = formatDuration(durationMs);
+          updateFields.push(`duration_after_rent = $${paramIndex++}::interval`);
+          updateValues.push(duration_after_rent);
+        } else {
+          // If duration is negative or zero, set to 00:00:00
+          const duration_after_rent = '00:00:00';
+          updateFields.push(`duration_after_rent = $${paramIndex++}::interval`);
+          updateValues.push(duration_after_rent);
+        }
       }
     }
 
