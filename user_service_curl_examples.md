@@ -215,7 +215,7 @@ curl -X POST https://api.cuub.tech/pop/CUBT062510000029/1 | jq .
 
 ### Pop all batteries from station
 ```bash
-curl -X POST https://api.cuub.tech/pop/CUBT062510000029/all
+curl -X POST https://api.cuub.tech/pop/RL3T062411030004/all
 ```
 
 ### Pop all batteries from different station
