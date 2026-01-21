@@ -214,12 +214,12 @@ async function refreshTokenAutomatically() {
 
 /**
  * Schedule the next automatic token refresh
- * Uses random interval between 30 minutes and 2 hours
+ * Uses random interval between 15 minutes and 30 minutes
  */
 function scheduleNextTokenRefresh() {
-  // Random interval between 30 minutes (1,800,000 ms) and 2 hours (7,200,000 ms)
-  const minInterval = 30 * 60 * 1000; // 30 minutes in milliseconds
-  const maxInterval = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+  // Random interval between 15 minutes (900,000 ms) and 30 minutes (1,800,000 ms)
+  const minInterval = 15 * 60 * 1000; // 15 minutes in milliseconds
+  const maxInterval = 30 * 60 * 1000; // 30 minutes in milliseconds
   const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
   
   const hours = Math.floor(randomInterval / (60 * 60 * 1000));
