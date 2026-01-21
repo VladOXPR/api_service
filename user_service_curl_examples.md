@@ -7,10 +7,7 @@
 curl -X POST https://api.cuub.tech/users \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "John Doe",
-    "username": "johndoe",
-    "email": "john.doe@example.com",
-    "password": "securePassword123"
+    "username": "johndoe"
   }'
 ```
 
@@ -19,10 +16,7 @@ curl -X POST https://api.cuub.tech/users \
 curl -X POST https://api.cuub.tech/users \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Admin User",
     "username": "admin_user",
-    "email": "admin@example.com",
-    "password": "adminPassword123",
     "type": "ADMIN"
   }'
 ```
@@ -32,10 +26,7 @@ curl -X POST https://api.cuub.tech/users \
 curl -X POST https://api.cuub.tech/users \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Distributor Name",
     "username": "distributor1",
-    "email": "distributor@example.com",
-    "password": "distPassword123",
     "type": "DISTRIBUTOR"
   }'
 ```
@@ -45,10 +36,7 @@ curl -X POST https://api.cuub.tech/users \
 curl -X POST https://api.cuub.tech/users \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Jane Smith",
     "username": "janesmith",
-    "email": "jane.smith@example.com",
-    "password": "janePassword123",
     "type": "HOST"
   }'
 ```
@@ -58,10 +46,7 @@ curl -X POST https://api.cuub.tech/users \
 curl -X POST https://api.cuub.tech/users \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Jane Smith",
     "username": "janesmith",
-    "email": "jane.smith@example.com",
-    "password": "janePassword123",
     "type": "HOST"
   }' | jq .
 ```
@@ -96,40 +81,12 @@ curl https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f | jq .
 
 ## PATCH /users/:id - Update user
 
-### Update multiple fields
+### Update username
 ```bash
 curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "New Name",
-    "email": "updated@example.com"
-  }'
-```
-
-### Update only password
-```bash
-curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
-  -H "Content-Type: application/json" \
-  -d '{
-    "password": "newPassword123"
-  }'
-```
-
-### Update only name
-```bash
-curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Updated Name"
-  }'
-```
-
-### Update only email
-```bash
-curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "newemail@example.com"
+    "username": "new_username"
   }'
 ```
 
@@ -142,13 +99,23 @@ curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
   }'
 ```
 
+### Update both username and type
+```bash
+curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "updated_username",
+    "type": "DISTRIBUTOR"
+  }'
+```
+
 ### Pretty-print response
 ```bash
 curl -X PATCH https://api.cuub.tech/users/16050213-9187-46d3-a526-acec0723bc8f \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "New Name",
-    "email": "updated@example.com"
+    "username": "new_username",
+    "type": "ADMIN"
   }' | jq .
 ```
 
@@ -198,14 +165,13 @@ curl -X POST https://api.cuub.tech/pop/CUBT062510000029/1 | jq .
 ```json
 {
   "success": true,
-  "data": {
-    "lockid": 1,
-    "update_time": 1768787700528,
-    "batteryid": "CUBH5A000513",
-    "cabinetStr": "CUBT062510000029",
-    "borrowstatus": true
-  },
-  "message": "Battery popped from slot 1"
+  "data": [
+    {
+      "slot": 1,
+      "manufacture_id": "CUBH5A000513"
+    }
+  ],
+  "count": 1
 }
 ```
 
@@ -228,62 +194,22 @@ curl -X POST https://api.cuub.tech/pop/CUBT062510000030/all
 curl -X POST https://api.cuub.tech/pop/CUBT062510000029/all | jq .
 ```
 
-**Expected Response (all successful):**
+**Expected Response:**
 ```json
 {
   "success": true,
-  "data": {
-    "results": [
-      {
-        "slot": 1,
-        "success": true,
-        "data": {
-          "lockid": 1,
-          "update_time": 1768787700528,
-          "batteryid": "CUBH5A000513",
-          "cabinetStr": "CUBT062510000029",
-          "borrowstatus": true
-        }
-      },
-      ...
-    ]
-  },
-  "message": "Popped batteries from 6 out of 6 slots",
-  "summary": {
-    "successful": 6,
-    "failed": 0,
-    "total": 6
-  }
-}
-```
-
-**Expected Response (partial success):**
-```json
-{
-  "success": false,
-  "data": {
-    "results": [
-      {
-        "slot": 1,
-        "success": true,
-        "data": {...}
-      },
-      ...
-    ],
-    "errors": [
-      {
-        "slot": 4,
-        "success": false,
-        "error": "Failed to pop battery from slot"
-      }
-    ]
-  },
-  "message": "Popped batteries from 5 out of 6 slots",
-  "summary": {
-    "successful": 5,
-    "failed": 1,
-    "total": 6
-  }
+  "data": [
+    {
+      "slot": 1,
+      "manufacture_id": "CUBH5A000513"
+    },
+    {
+      "slot": 2,
+      "manufacture_id": "CUBH5A000514"
+    },
+    ...
+  ],
+  "count": 6
 }
 ```
 
@@ -293,21 +219,21 @@ curl -X POST https://api.cuub.tech/pop/CUBT062510000029/all | jq .
 
 ### User Service API
 - All endpoints return JSON responses
-- Required fields for POST `/users`: `name`, `username`, `email`, `password`
-- Optional field for POST `/users`: `type` (must be one of: `HOST`, `DISTRIBUTOR`, `ADMIN`)
+- Required field for POST `/users`: `username`
+- Optional field for POST `/users`: `type` (must be one of: `HOST`, `DISTRIBUTOR`, `ADMIN`, defaults to `HOST`)
 - User ID is a UUID automatically generated by the database
-- Passwords are stored as plain text (consider hashing in production)
-- GET endpoints exclude password fields from responses
+- PATCH `/users/:id` allows updating `username` and/or `type`
+- All endpoints return: `id`, `username`, `type`, `created_at`, `updated_at`
 
 ### Pop Battery Endpoints
 - **POST `/pop/:station_id/:slot`**: Pops out a battery from a specific slot (1-6) without renting
   - Uses the Relink API to send the pop command
   - Automatically handles token refresh if the token expires
-  - Returns the Relink API response including `lockid`, `update_time`, `batteryid`, `cabinetStr`, and `borrowstatus`
+  - Returns a simplified response with `data` array containing `slot` and `manufacture_id`
 - **POST `/pop/:station_id/all`**: Pops out all batteries from all 6 slots
   - Sends 6 sequential requests (one for each slot from 1 to 6)
-  - Returns a summary with results for each slot
+  - Returns a simplified response with `data` array containing all successful pops
   - Status code 200 if all successful, 207 if partial success, 500 if all failed
-  - Includes a summary with counts of successful and failed operations
+  - Response includes `success`, `data` array, and `count`
 - Both endpoints require a valid token in the `token` table in the database
 - The token is automatically refreshed if it expires during the request

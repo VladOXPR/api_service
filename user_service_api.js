@@ -242,17 +242,47 @@ router.get('/users', async (req, res) => {
   let client;
   try {
     client = await pool.connect();
-    const result = await client.query(
+    
+    // Get all users
+    const usersResult = await client.query(
       'SELECT id, username, type, created_at, updated_at FROM users ORDER BY created_at DESC'
     );
     
+    // Get all station associations
+    // Note: If the table name is different, update it here
+    const stationsResult = await client.query(
+      'SELECT user_id, station_id FROM user_stations'
+    );
+    
+    // Group stations by user_id
+    const stationsByUserId = {};
+    stationsResult.rows.forEach(row => {
+      if (!stationsByUserId[row.user_id]) {
+        stationsByUserId[row.user_id] = [];
+      }
+      stationsByUserId[row.user_id].push(row.station_id);
+    });
+    
+    // Add stations array to each user
+    const usersWithStations = usersResult.rows.map(user => {
+      return {
+        ...user,
+        stations: stationsByUserId[user.id] || []
+      };
+    });
+    
     res.json({
       success: true,
-      data: result.rows,
-      count: result.rows.length
+      data: usersWithStations,
+      count: usersWithStations.length
     });
   } catch (error) {
     console.error('Error fetching users:', error);
+    
+    // Check if it's a "table does not exist" error and provide helpful message
+    if (error.message && error.message.includes('does not exist')) {
+      console.error('Join table might have a different name. Common names: user_stations, users_stations, user_station');
+    }
     
     // Provide helpful error messages for common connection issues
     let errorMessage = error.message || 'Failed to fetch users';
@@ -300,24 +330,48 @@ router.get('/users/:id', async (req, res) => {
     }
     
     client = await pool.connect();
-    const result = await client.query(
+    
+    // Get user data
+    const userResult = await client.query(
       'SELECT id, username, type, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
     
-    if (result.rows.length === 0) {
+    if (userResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
         error: 'User not found'
       });
     }
     
+    const user = userResult.rows[0];
+    
+    // Get associated stations from join table
+    // Note: If the table name is different, update it here
+    // Common names: user_stations, users_stations, user_station
+    const stationsResult = await client.query(
+      'SELECT station_id FROM user_stations WHERE user_id = $1',
+      [id]
+    );
+    
+    // Extract station IDs into an array
+    const stations = stationsResult.rows.map(row => row.station_id);
+    
+    // Add stations array to user data
+    user.stations = stations;
+    
     res.json({
       success: true,
-      data: result.rows[0]
+      data: user
     });
   } catch (error) {
     console.error('Error fetching user:', error);
+    
+    // Check if it's a "table does not exist" error and provide helpful message
+    if (error.message && error.message.includes('does not exist')) {
+      console.error('Join table might have a different name. Common names: user_stations, users_stations, user_station');
+    }
+    
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to fetch user'
