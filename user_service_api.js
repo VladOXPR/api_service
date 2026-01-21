@@ -320,15 +320,6 @@ router.get('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid UUID format'
-      });
-    }
-    
     client = await pool.connect();
     
     // Get user data
@@ -454,15 +445,6 @@ router.delete('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid UUID format'
-      });
-    }
-    
     client = await pool.connect();
     const result = await client.query(
       'DELETE FROM users WHERE id = $1 RETURNING id, username, type',
@@ -503,15 +485,6 @@ router.patch('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { username, type } = req.body;
-    
-    // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid UUID format'
-      });
-    }
     
     // Check if at least one field is being updated
     if (username === undefined && type === undefined) {
