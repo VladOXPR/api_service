@@ -234,6 +234,99 @@ async function sendPopCommand(stationId, slot, token, isRetry = false) {
 }
 
 /**
+ * Helper function to fetch rent data from Relink API
+ * @param {string} stationId - The station ID
+ * @param {number} startTime - Start time in epoch milliseconds
+ * @param {number} endTime - End time in epoch milliseconds
+ * @param {string} token - The authorization token
+ * @param {boolean} isRetry - Whether this is a retry after token refresh
+ * @returns {Promise<Object|null>} - Returns the response data or null if failed
+ */
+async function fetchRentData(stationId, startTime, endTime, token, isRetry = false) {
+  try {
+    // URL encode the createTime parameters
+    const url = `https://backend.energo.vip/api/order?cabinetid=${stationId}&createTime%5B0%5D=${startTime}&createTime%5B1%5D=${endTime}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Referer': 'https://backend.energo.vip/order/lease-order',
+        'oid': '3526'
+      }
+    });
+
+    // If request fails and we haven't retried yet, refresh token and retry
+    if (!response.ok && !isRetry) {
+      console.log(`⚠️ Relink API error for rent data (station ${stationId}): ${response.status} ${response.statusText}. Attempting token refresh...`);
+      
+      // Refresh the token
+      const newToken = await refreshToken();
+      
+      if (newToken) {
+        // Update token in database
+        let dbClient;
+        try {
+          dbClient = await pool.connect();
+          await dbClient.query('DELETE FROM token');
+          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
+          console.log('✅ Updated token in database');
+        } catch (dbError) {
+          console.error('Error updating token in database:', dbError);
+        } finally {
+          if (dbClient) {
+            dbClient.release();
+          }
+        }
+        
+        // Retry the request with new token
+        return fetchRentData(stationId, startTime, endTime, newToken, true);
+      } else {
+        console.error(`Failed to refresh token for rent data (station ${stationId})`);
+        return null;
+      }
+    }
+
+    if (!response.ok) {
+      console.error(`Relink API error for rent data (station ${stationId}) after retry: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // If it's a network/API error and we haven't retried, try refreshing token
+    if (!isRetry && (error.message?.includes('fetch') || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
+      console.log(`⚠️ Network error for rent data (station ${stationId}). Attempting token refresh...`);
+      
+      const newToken = await refreshToken();
+      
+      if (newToken) {
+        // Update token in database
+        let dbClient;
+        try {
+          dbClient = await pool.connect();
+          await dbClient.query('DELETE FROM token');
+          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
+          console.log('✅ Updated token in database');
+        } catch (dbError) {
+          console.error('Error updating token in database:', dbError);
+        } finally {
+          if (dbClient) {
+            dbClient.release();
+          }
+        }
+        
+        // Retry the request with new token
+        return fetchRentData(stationId, startTime, endTime, newToken, true);
+      }
+    }
+    
+    console.error(`Error fetching rent data for station ${stationId}:`, error);
+    return null;
+  }
+}
+
+/**
  * GET /users
  * Fetch a list of all users
  */
@@ -809,8 +902,114 @@ router.post('/pop/:station_id/:slot', async (req, res) => {
   }
 });
 
+/**
+ * GET /rents/:station_id/:dateRange
+ * Fetch rent data for a station within a date range
+ * Date range format: {datestart}_{dateend} (e.g., "2026-01-01_2026-01-31")
+ */
+router.get('/rents/:station_id/:dateRange', async (req, res) => {
+  try {
+    const { station_id, dateRange } = req.params;
+    
+    // Parse date range (format: YYYY-MM-DD_YYYY-MM-DD)
+    const dateParts = dateRange.split('_');
+    if (dateParts.length !== 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid date range format. Expected format: YYYY-MM-DD_YYYY-MM-DD (e.g., 2026-01-01_2026-01-31)'
+      });
+    }
+    
+    const [startDateStr, endDateStr] = dateParts;
+    
+    // Parse dates and convert to epoch milliseconds
+    // Set start date to beginning of day (00:00:00)
+    const startDate = new Date(startDateStr + 'T00:00:00.000Z');
+    // Set end date to end of day (23:59:59.999)
+    const endDate = new Date(endDateStr + 'T23:59:59.999Z');
+    
+    // Validate dates
+    if (isNaN(startDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid start date format: ${startDateStr}. Expected YYYY-MM-DD`
+      });
+    }
+    
+    if (isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid end date format: ${endDateStr}. Expected YYYY-MM-DD`
+      });
+    }
+    
+    if (startDate > endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Start date must be before or equal to end date'
+      });
+    }
+    
+    // Convert to epoch milliseconds
+    const startTime = startDate.getTime();
+    const endTime = endDate.getTime();
+    
+    // Get token from database
+    const token = await getTokenFromDatabase();
+    if (!token) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve authentication token'
+      });
+    }
+    
+    // Fetch rent data from Relink API
+    const rentData = await fetchRentData(station_id, startTime, endTime, token);
+    
+    if (!rentData) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch rent data from Relink API'
+      });
+    }
+    
+    // Calculate totalAmount by summing all returnRent values
+    // Also count totalRents (only non-zero returnRent values)
+    let totalAmount = 0;
+    let totalRents = 0;
+    if (rentData.content && Array.isArray(rentData.content)) {
+      rentData.content.forEach(order => {
+        if (order.returnRent !== undefined && order.returnRent !== null) {
+          const returnRent = parseFloat(order.returnRent) || 0;
+          totalAmount += returnRent;
+          // Count only non-zero rents
+          if (returnRent > 0) {
+            totalRents++;
+          }
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        station_id: station_id,
+        dateRange: dateRange,
+        totalAmount: parseFloat(totalAmount.toFixed(2)), // Round to 2 decimal places
+        totalRents: totalRents
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching rent data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch rent data'
+    });
+  }
+});
+
 // Log when router is loaded
-console.log('📦 User service API router initialized with routes: GET, POST, PATCH, DELETE /users, POST /pop/:station_id/:slot, POST /pop/:station_id/all');
+console.log('📦 User service API router initialized with routes: GET, POST, PATCH, DELETE /users, POST /pop/:station_id/:slot, POST /pop/:station_id/all, GET /rents/:station_id/:dateRange');
 
 module.exports = router;
 
