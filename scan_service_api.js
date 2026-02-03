@@ -623,7 +623,7 @@ router.post('/battery/:sticker_id', async (req, res) => {
     const insertQuery = `
       INSERT INTO scans (sticker_id, order_id, session_length, sticker_type, duration_after_rent)
       VALUES ($1, $2, $3::interval, $4, $5::interval)
-      RETURNING scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent
+      RETURNING scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent, sizl
     `;
     
     const result = await client.query(insertQuery, [
@@ -726,6 +726,13 @@ router.patch('/battery/:sticker_id', async (req, res) => {
       updateValues.push(session_length_interval);
     }
 
+    // Allow updating sizl from request body
+    if (req.body && req.body.sizl !== undefined) {
+      const sizlValue = req.body.sizl === true || req.body.sizl === 'true' || req.body.sizl === 1 || req.body.sizl === '1';
+      updateFields.push(`sizl = $${paramIndex++}`);
+      updateValues.push(sizlValue);
+    }
+
     // Fetch order data from Relink API to update order_id and duration_after_rent
     const orderData = await getOrderDataForScan(manufacture_id, token);
     
@@ -753,7 +760,7 @@ router.patch('/battery/:sticker_id', async (req, res) => {
     if (updateFields.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No fields to update. Provide at least one of: sticker_type, session_length, or ensure manufacture_id is valid.'
+        error: 'No fields to update. Provide at least one of: sticker_type, session_length, sizl (in request body), or ensure manufacture_id is valid.'
       });
     }
 
@@ -779,7 +786,7 @@ router.patch('/battery/:sticker_id', async (req, res) => {
       UPDATE scans
       SET ${updateFields.join(', ')}
       WHERE scan_id = $${paramIndex}
-      RETURNING scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent
+      RETURNING scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent, sizl
     `;
 
     const result = await client.query(updateQuery, updateValues);
@@ -821,7 +828,7 @@ router.get('/scans', async (req, res) => {
   try {
     client = await pool.connect();
     const result = await client.query(
-      'SELECT scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent FROM scans ORDER BY scan_time DESC'
+      'SELECT scan_id, sticker_id, order_id, scan_time, session_length, sticker_type, duration_after_rent, sizl FROM scans ORDER BY scan_time DESC'
     );
 
     res.json({
