@@ -541,7 +541,7 @@ router.get('/battery/:sticker_id', async (req, res) => {
 /**
  * POST /battery/:sticker_id
  * Create a scan record
- * Headers: manufacture_id, sticker_type
+ * Headers: manufacture_id (optional if battery has manufacture_id), sticker_type is ignored – taken from battery.type
  * Body: session_length (default: 0)
  */
 router.post('/battery/:sticker_id', async (req, res) => {
@@ -550,7 +550,6 @@ router.post('/battery/:sticker_id', async (req, res) => {
   try {
     const { sticker_id } = req.params;
     const manufacture_id = req.headers['manufacture_id'];
-    const sticker_type = req.headers['sticker_type'];
     const session_length = req.body?.session_length || 0;
 
     // Validate required fields
@@ -561,23 +560,40 @@ router.post('/battery/:sticker_id', async (req, res) => {
       });
     }
 
-    if (!manufacture_id) {
-      return res.status(400).json({
+    // Look up battery by sticker_id to get type (and optionally manufacture_id)
+    client = await pool.connect();
+    const batteryResult = await client.query(
+      'SELECT manufacture_id, type FROM battery WHERE sticker_id = $1',
+      [sticker_id]
+    );
+
+    if (batteryResult.rows.length === 0) {
+      if (client) client.release();
+      return res.status(404).json({
         success: false,
-        error: 'manufacture_id header is required'
+        error: `Battery with sticker_id "${sticker_id}" not found`
       });
     }
 
-    if (!sticker_type) {
+    const battery = batteryResult.rows[0];
+    const sticker_type = battery.type ?? null;
+    const manufacture_id_from_db = battery.manufacture_id;
+
+    if (!manufacture_id && !manufacture_id_from_db) {
+      if (client) client.release();
       return res.status(400).json({
         success: false,
-        error: 'sticker_type header is required'
+        error: 'manufacture_id header is required when battery has no manufacture_id'
       });
     }
+
+    const effective_manufacture_id = manufacture_id || manufacture_id_from_db;
 
     // Get token from database
     const token = await getTokenFromDatabase();
     if (!token) {
+      if (client) client.release();
+      client = null;
       console.warn('⚠️ No token found in database for Relink API calls');
       return res.status(503).json({
         success: false,
@@ -586,7 +602,7 @@ router.post('/battery/:sticker_id', async (req, res) => {
     }
 
     // Fetch order data from Relink API
-    const orderData = await getOrderDataForScan(manufacture_id, token);
+    const orderData = await getOrderDataForScan(effective_manufacture_id, token);
     const order_id = orderData.orderNo || null;
 
     // Calculate duration_after_rent: current time - starttime
@@ -618,8 +634,7 @@ router.post('/battery/:sticker_id', async (req, res) => {
       session_length_interval = '0';
     }
 
-    // Insert scan record into database
-    client = await pool.connect();
+    // Insert scan record into database (client already connected from battery lookup)
     const insertQuery = `
       INSERT INTO scans (sticker_id, order_id, session_length, sticker_type, duration_after_rent)
       VALUES ($1, $2, $3::interval, $4, $5::interval)
