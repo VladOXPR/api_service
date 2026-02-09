@@ -57,11 +57,9 @@ pool.on('error', (err) => {
   console.error('❌ Unexpected error on idle client', err);
 });
 
-// Token refresh lock to prevent concurrent token refresh requests
-let tokenRefreshPromise = null;
-
 /**
  * Helper function to get token from database
+ * Token is refreshed only periodically by server.js (15-30 min); API endpoints do not trigger refresh.
  */
 async function getTokenFromDatabase() {
   let client;
@@ -83,67 +81,13 @@ async function getTokenFromDatabase() {
 }
 
 /**
- * Helper function to refresh token by calling the token endpoint
- * Uses promise-based locking to prevent concurrent refresh requests
- * @returns {Promise<string|null>} - Returns the new token or null if refresh failed
- */
-async function refreshToken() {
-  // If a token refresh is already in progress, wait for it and return the result
-  if (tokenRefreshPromise) {
-    console.log('⏳ Token refresh already in progress, waiting for existing refresh...');
-    try {
-      return await tokenRefreshPromise;
-    } catch (error) {
-      console.error('Error waiting for token refresh:', error);
-      return null;
-    }
-  }
-  
-  // Create new refresh promise
-  tokenRefreshPromise = (async () => {
-    try {
-      console.log('🔄 Token expired, refreshing token...');
-      const response = await fetch('https://api.cuub.tech/token', {
-        method: 'GET'
-      });
-
-      if (!response.ok) {
-        console.error(`Token refresh failed: ${response.status} ${response.statusText}`);
-        return null;
-      }
-
-      const data = await response.json();
-      if (data.success && data.token) {
-        console.log('✅ Token refreshed successfully');
-        return data.token;
-      }
-      
-      console.error('Token refresh response missing token:', data);
-      return null;
-    } catch (error) {
-      console.error('Error refreshing token:', error);
-      return null;
-    } finally {
-      // Clear the promise after a short delay to allow concurrent calls to see the result
-      setTimeout(() => {
-        tokenRefreshPromise = null;
-      }, 2000);
-    }
-  })();
-  
-  const result = await tokenRefreshPromise;
-  return result;
-}
-
-/**
  * Helper function to send pop command to Relink API for a specific slot
  * @param {string} stationId - The station ID
  * @param {number} slot - The slot number (1-6)
  * @param {string} token - The authorization token
- * @param {boolean} isRetry - Whether this is a retry after token refresh
  * @returns {Promise<Object|null>} - Returns the response data or null if failed
  */
-async function sendPopCommand(stationId, slot, token, isRetry = false) {
+async function sendPopCommand(stationId, slot, token) {
   try {
     const url = 'https://backend.energo.vip/api/command/sendCommandBySign';
     const response = await fetch(url, {
@@ -162,72 +106,14 @@ async function sendPopCommand(stationId, slot, token, isRetry = false) {
       })
     });
 
-    // If request fails and we haven't retried yet, refresh token and retry
-    if (!response.ok && !isRetry) {
-      console.log(`⚠️ Relink API error for pop command (station ${stationId}, slot ${slot}): ${response.status} ${response.statusText}. Attempting token refresh...`);
-      
-      // Refresh the token
-      const newToken = await refreshToken();
-      
-      if (newToken) {
-        // Update token in database
-        let dbClient;
-        try {
-          dbClient = await pool.connect();
-          await dbClient.query('DELETE FROM token');
-          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
-          console.log('✅ Updated token in database');
-        } catch (dbError) {
-          console.error('Error updating token in database:', dbError);
-        } finally {
-          if (dbClient) {
-            dbClient.release();
-          }
-        }
-        
-        // Retry the request with new token
-        return sendPopCommand(stationId, slot, newToken, true);
-      } else {
-        console.error(`Failed to refresh token for pop command (station ${stationId}, slot ${slot})`);
-        return null;
-      }
-    }
-
     if (!response.ok) {
-      console.error(`Relink API error for pop command (station ${stationId}, slot ${slot}) after retry: ${response.status} ${response.statusText}`);
+      console.error(`Relink API error for pop command (station ${stationId}, slot ${slot}): ${response.status} ${response.statusText}`);
       return null;
     }
 
     const data = await response.json();
     return data;
   } catch (error) {
-    // If it's a network/API error and we haven't retried, try refreshing token
-    if (!isRetry && (error.message?.includes('fetch') || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
-      console.log(`⚠️ Network error for pop command (station ${stationId}, slot ${slot}). Attempting token refresh...`);
-      
-      const newToken = await refreshToken();
-      
-      if (newToken) {
-        // Update token in database
-        let dbClient;
-        try {
-          dbClient = await pool.connect();
-          await dbClient.query('DELETE FROM token');
-          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
-          console.log('✅ Updated token in database');
-        } catch (dbError) {
-          console.error('Error updating token in database:', dbError);
-        } finally {
-          if (dbClient) {
-            dbClient.release();
-          }
-        }
-        
-        // Retry the request with new token
-        return sendPopCommand(stationId, slot, newToken, true);
-      }
-    }
-    
     console.error(`Error sending pop command for station ${stationId}, slot ${slot}:`, error);
     return null;
   }
@@ -239,10 +125,9 @@ async function sendPopCommand(stationId, slot, token, isRetry = false) {
  * @param {number} startTime - Start time in epoch milliseconds
  * @param {number} endTime - End time in epoch milliseconds
  * @param {string} token - The authorization token
- * @param {boolean} isRetry - Whether this is a retry after token refresh
  * @returns {Promise<Object|null>} - Returns the response data or null if failed
  */
-async function fetchRentData(stationId, startTime, endTime, token, isRetry = false) {
+async function fetchRentData(stationId, startTime, endTime, token) {
   try {
     // URL encode the createTime parameters
     const url = `https://backend.energo.vip/api/order?cabinetid=${stationId}&createTime%5B0%5D=${startTime}&createTime%5B1%5D=${endTime}`;
@@ -255,72 +140,14 @@ async function fetchRentData(stationId, startTime, endTime, token, isRetry = fal
       }
     });
 
-    // If request fails and we haven't retried yet, refresh token and retry
-    if (!response.ok && !isRetry) {
-      console.log(`⚠️ Relink API error for rent data (station ${stationId}): ${response.status} ${response.statusText}. Attempting token refresh...`);
-      
-      // Refresh the token
-      const newToken = await refreshToken();
-      
-      if (newToken) {
-        // Update token in database
-        let dbClient;
-        try {
-          dbClient = await pool.connect();
-          await dbClient.query('DELETE FROM token');
-          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
-          console.log('✅ Updated token in database');
-        } catch (dbError) {
-          console.error('Error updating token in database:', dbError);
-        } finally {
-          if (dbClient) {
-            dbClient.release();
-          }
-        }
-        
-        // Retry the request with new token
-        return fetchRentData(stationId, startTime, endTime, newToken, true);
-      } else {
-        console.error(`Failed to refresh token for rent data (station ${stationId})`);
-        return null;
-      }
-    }
-
     if (!response.ok) {
-      console.error(`Relink API error for rent data (station ${stationId}) after retry: ${response.status} ${response.statusText}`);
+      console.error(`Relink API error for rent data (station ${stationId}): ${response.status} ${response.statusText}`);
       return null;
     }
 
     const data = await response.json();
     return data;
   } catch (error) {
-    // If it's a network/API error and we haven't retried, try refreshing token
-    if (!isRetry && (error.message?.includes('fetch') || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
-      console.log(`⚠️ Network error for rent data (station ${stationId}). Attempting token refresh...`);
-      
-      const newToken = await refreshToken();
-      
-      if (newToken) {
-        // Update token in database
-        let dbClient;
-        try {
-          dbClient = await pool.connect();
-          await dbClient.query('DELETE FROM token');
-          await dbClient.query('INSERT INTO token (value) VALUES ($1)', [newToken]);
-          console.log('✅ Updated token in database');
-        } catch (dbError) {
-          console.error('Error updating token in database:', dbError);
-        } finally {
-          if (dbClient) {
-            dbClient.release();
-          }
-        }
-        
-        // Retry the request with new token
-        return fetchRentData(stationId, startTime, endTime, newToken, true);
-      }
-    }
-    
     console.error(`Error fetching rent data for station ${stationId}:`, error);
     return null;
   }
