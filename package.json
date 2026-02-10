@@ -13,7 +13,8 @@
     "express": "^4.22.1",
     "node-fetch": "^2.7.0",
     "pg": "^8.11.3",
-    "puppeteer": "^24.0.0"
+    "puppeteer": "^24.0.0",
+    "stripe": "^20.3.1"
   },
   "optionalDependencies": {
     "@sparticuz/chromium": "^119.0.0",

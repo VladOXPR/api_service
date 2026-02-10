@@ -92,6 +92,22 @@ try {
   });
 }
 
+// Load Stripe routes with error handling
+let stripeRoutes;
+try {
+  stripeRoutes = require('./stripe_api');
+  console.log('✅ Stripe API routes loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading Stripe API routes:', error);
+  stripeRoutes = express.Router();
+  stripeRoutes.get('*', (req, res) => {
+    res.status(500).json({
+      success: false,
+      error: 'Stripe API not available: ' + error.message
+    });
+  });
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -124,6 +140,10 @@ console.log('🔗 Token routes mounted at root path');
 // Mount scan routes
 app.use('/', scanRoutes);
 console.log('🔗 Scan routes mounted at root path');
+
+// Mount Stripe routes
+app.use('/', stripeRoutes);
+console.log('🔗 Stripe routes mounted at root path');
 
 // Debug: Log all registered routes (development only)
 if (process.env.NODE_ENV !== 'production') {
