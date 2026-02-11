@@ -83,13 +83,21 @@ router.get('/rents/mtd', async (req, res) => {
   }
   try {
     const chicagoNow = DateTime.now().setZone(CHICAGO_ZONE);
-    const gte = parseDateToUnixSeconds('mtd', false);
-    const lte = Math.floor(DateTime.now().toSeconds());
-
-    const balanceTransactions = await fetchAllBalanceTransactionsInRange(gte, lte);
-
     const monthStart = chicagoNow.startOf('month');
     const todayStart = chicagoNow.startOf('day');
+    const gte = Math.floor(monthStart.toSeconds());
+    const lte = Math.floor(DateTime.now().toSeconds());
+
+    const prevMonthStart = monthStart.minus({ months: 1 });
+    const prevMonthSameDay = todayStart.minus({ months: 1 });
+    const gtePrev = Math.floor(prevMonthStart.toSeconds());
+    const ltePrev = Math.floor(prevMonthSameDay.endOf('day').toSeconds());
+
+    const [balanceTransactions, prevBalanceTransactions] = await Promise.all([
+      fetchAllBalanceTransactionsInRange(gte, lte),
+      fetchAllBalanceTransactionsInRange(gtePrev, ltePrev),
+    ]);
+
     const dayCount = Math.round(todayStart.diff(monthStart, 'days').days) + 1;
 
     const byDay = {};
@@ -99,8 +107,18 @@ router.get('/rents/mtd', async (req, res) => {
       byDay[key] = { date: formatDateLabel(key), rents: 0, netCents: 0 };
     }
 
+    const prevDayCount = Math.round(prevMonthSameDay.diff(prevMonthStart, 'days').days) + 1;
+    const byDayPrev = {};
+    for (let i = 0; i < prevDayCount; i++) {
+      const d = prevMonthStart.plus({ days: i });
+      const key = d.toISODate().slice(0, 10);
+      byDayPrev[key] = { rents: 0, netCents: 0 };
+    }
+
     let positiveCents = 0;
     let negativeCents = 0;
+    let ppositiveCents = 0;
+    let pnegativeCents = 0;
 
     for (const bt of balanceTransactions) {
       const net = bt.net != null ? bt.net : 0;
@@ -121,22 +139,53 @@ router.get('/rents/mtd', async (req, res) => {
       }
     }
 
+    for (const bt of prevBalanceTransactions) {
+      const net = bt.net != null ? bt.net : 0;
+      const type = bt.type || '';
+      const key = chicagoDateStringFromUnix(bt.created);
+
+      if (!REVENUE_TYPES.has(type)) continue;
+
+      if (net > 0) {
+        ppositiveCents += net;
+      } else if (net < 0) {
+        pnegativeCents += net;
+      }
+
+      if (byDayPrev[key]) {
+        byDayPrev[key].netCents += net;
+        if (type === 'charge' && net > 0) byDayPrev[key].rents += 1;
+      }
+    }
+
     const firstDayStr = monthStart.toISODate().slice(0, 10);
     const lastDayStr = todayStart.toISODate().slice(0, 10);
 
     const data = Object.keys(byDay)
       .sort()
-      .map((key) => ({
-        date: byDay[key].date,
-        rents: byDay[key].rents,
-        money: '$' + (byDay[key].netCents / 100).toFixed(0),
-      }));
+      .map((key) => {
+        const [y, m, d] = key.split('-').map(Number);
+        const prevKey = DateTime.fromObject({ year: y, month: m, day: d }, { zone: CHICAGO_ZONE })
+          .minus({ months: 1 })
+          .toISODate()
+          .slice(0, 10);
+        const prev = byDayPrev[prevKey];
+        return {
+          date: byDay[key].date,
+          rents: byDay[key].rents,
+          money: '$' + (byDay[key].netCents / 100).toFixed(0),
+          prents: prev ? prev.rents : 0,
+          pmoney: prev ? '$' + (prev.netCents / 100).toFixed(0) : '$0',
+        };
+      });
 
     res.json({
       success: true,
       mtd: `${formatDateLabel(firstDayStr)} – ${formatDateLabel(lastDayStr)}`,
       positive: positiveCents / 100,
       negative: negativeCents / 100,
+      ppositive: ppositiveCents / 100,
+      pnegative: pnegativeCents / 100,
       data,
     });
   } catch (error) {
