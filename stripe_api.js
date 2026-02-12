@@ -428,14 +428,14 @@ router.get('/rents/recent', async (req, res) => {
 });
 
 /**
- * GET /stripe/balance-transactions
- * Returns Stripe balance transactions, optionally filtered by date range.
+ * GET /stripe/charges
+ * Returns Stripe charges (stripe.charges.list), optionally filtered by date range.
  * Query:
  *   - limit (optional, default 10, max 100) when no date filter.
  *   - from (optional): YYYY-MM-DD or "mtd" for month-to-date (first day of current month).
  *   - to (optional): YYYY-MM-DD; defaults to today when "from" is set.
  */
-router.get('/stripe/balance-transactions', async (req, res) => {
+router.get('/stripe/charges', async (req, res) => {
   if (!stripe) {
     return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
   }
@@ -454,18 +454,18 @@ router.get('/stripe/balance-transactions', async (req, res) => {
       listParams.created = { gte, lte };
     }
 
-    const balanceTransactions = await stripe.balanceTransactions.list(listParams);
+    const charges = await stripe.charges.list(listParams);
 
     res.json({
       success: true,
-      data: balanceTransactions.data,
-      has_more: balanceTransactions.has_more,
+      data: charges.data,
+      has_more: charges.has_more,
     });
   } catch (error) {
     console.error('Stripe API error:', error);
     res.status(error.statusCode || 500).json({
       success: false,
-      error: error.message || 'Failed to fetch balance transactions',
+      error: error.message || 'Failed to fetch charges',
     });
   }
 });

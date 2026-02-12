@@ -547,9 +547,9 @@ curl -X GET https://api.cuub.tech/token
 
 ## Stripe
 
-### 21. List balance transactions
+### 21. List charges
 
-Returns Stripe balance transactions, optionally filtered by date range. Requires `STRIPE_SECRET_KEY` to be set.
+Returns Stripe charges (`stripe.charges.list`), optionally filtered by date range. Requires `STRIPE_SECRET_KEY` to be set.
 
 **Query parameters**
 
@@ -561,16 +561,16 @@ Returns Stripe balance transactions, optionally filtered by date range. Requires
 
 ```bash
 # Month to date (1st of current month through today)
-curl "https://api.cuub.tech/stripe/balance-transactions?from=mtd"
+curl "https://api.cuub.tech/stripe/charges?from=mtd"
 
 # Specific range (e.g. Feb 1 – Feb 8, 2025)
-curl "https://api.cuub.tech/stripe/balance-transactions?from=2025-02-01&to=2025-02-08"
+curl "https://api.cuub.tech/stripe/charges?from=2025-02-01&to=2025-02-08"
 
 # From a date to today (to omitted = today)
-curl "https://api.cuub.tech/stripe/balance-transactions?from=2025-02-01"
+curl "https://api.cuub.tech/stripe/charges?from=2025-02-01"
 
 # No date filter (uses limit only)
-curl "https://api.cuub.tech/stripe/balance-transactions?limit=10"
+curl "https://api.cuub.tech/stripe/charges?limit=10"
 ```
 
 **Expected response**
@@ -578,14 +578,14 @@ curl "https://api.cuub.tech/stripe/balance-transactions?limit=10"
 ```json
 {
   "success": true,
-  "data": [ /* Stripe balance transaction objects */ ],
+  "data": [ /* Stripe charge objects */ ],
   "has_more": false
 }
 ```
 
 ### 22. Rents month-to-date
 
-Returns per-day rent count and net sum from Stripe balance transactions for the current month to date (Chicago time). Correlates to `stripe/balance-transactions?from=mtd`. Includes previous-month comparison fields (`ppositive`, `pnegative`, `prents`, `pmoney`).
+Returns per-day rent count and net sum from Stripe balance transactions for the current month to date (Chicago time). Correlates to `stripe/charges?from=mtd`. Includes previous-month comparison fields (`ppositive`, `pnegative`, `prents`, `pmoney`).
 
 ```bash
 curl -X GET https://api.cuub.tech/rents/mtd
@@ -610,7 +610,7 @@ curl -X GET https://api.cuub.tech/rents/mtd
 
 ### 23. Rents range
 
-Aggregated rents for a date range. Includes previous-month comparison (`ppositive`, `pnegative`, `prents`, `pmoney`) for the same calendar span one month earlier, same as `/rents/mtd`. Correlates to `stripe/balance-transactions?from=YYYY-MM-DD&to=YYYY-MM-DD`. All dates in America/Chicago.
+Aggregated rents for a date range. Includes previous-month comparison (`ppositive`, `pnegative`, `prents`, `pmoney`) for the same calendar span one month earlier, same as `/rents/mtd`. Correlates to `stripe/charges?from=YYYY-MM-DD&to=YYYY-MM-DD`. All dates in America/Chicago.
 
 **Endpoint:** `GET /rents/range`
 
@@ -644,7 +644,7 @@ curl "https://api.cuub.tech/rents/range?from=2025-02-01&to=2025-02-08"
 
 ### 24. Rents from (date to today)
 
-Aggregated rents from a given date through today. Correlates to `stripe/balance-transactions?from=YYYY-MM-DD` (to omitted = today in Chicago).
+Aggregated rents from a given date through today. Correlates to `stripe/charges?from=YYYY-MM-DD` (to omitted = today in Chicago).
 
 **Endpoint:** `GET /rents/from`
 
@@ -664,7 +664,7 @@ Same shape as **23. Rents range** (e.g. `range`, `positive`, `negative`, `pposit
 
 ### 25. Rents recent (limit only)
 
-Aggregated rents for the most recent N balance transactions, with no date filter. Correlates to `stripe/balance-transactions?limit=N`. Days in `data` are those that appear in the last N transactions.
+Aggregated rents for the most recent N balance transactions, with no date filter. Correlates to `stripe/charges?limit=N`. Days in `data` are those that appear in the last N transactions.
 
 **Endpoint:** `GET /rents/recent`
 
