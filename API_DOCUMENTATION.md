@@ -585,7 +585,7 @@ curl "https://api.cuub.tech/stripe/balance-transactions?limit=10"
 
 ### 22. Rents month-to-date
 
-Returns per-day rent count and sum of `amount` from Stripe balance transactions for the current month to date.
+Returns per-day rent count and net sum from Stripe balance transactions for the current month to date (Chicago time). Correlates to `stripe/balance-transactions?from=mtd`. Includes previous-month comparison fields (`ppositive`, `pnegative`, `prents`, `pmoney`).
 
 ```bash
 curl -X GET https://api.cuub.tech/rents/mtd
@@ -597,9 +597,95 @@ curl -X GET https://api.cuub.tech/rents/mtd
 {
   "success": true,
   "mtd": "Feb 1, 2026 – Feb 9, 2026",
+  "positive": 426,
+  "negative": -57,
+  "ppositive": 380,
+  "pnegative": -42,
   "data": [
-    { "date": "Feb 1, 2026", "rents": 5, "money": "$15" },
-    { "date": "Feb 2, 2026", "rents": 6, "money": "$18" }
+    { "date": "Feb 1, 2026", "rents": 5, "money": "$15", "prents": 4, "pmoney": "$12" },
+    { "date": "Feb 2, 2026", "rents": 6, "money": "$18", "prents": 5, "pmoney": "$15" }
+  ]
+}
+```
+
+### 23. Rents range
+
+Aggregated rents for a date range (same shape as `/rents/mtd` without previous-month fields). Correlates to `stripe/balance-transactions?from=YYYY-MM-DD&to=YYYY-MM-DD`. All dates in America/Chicago.
+
+**Endpoint:** `GET /rents/range`
+
+**Query parameters**
+
+- `from` (required): `YYYY-MM-DD` start date.
+- `to` (required): `YYYY-MM-DD` end date.
+
+**Example**
+
+```bash
+curl "https://api.cuub.tech/rents/range?from=2025-02-01&to=2025-02-08"
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "range": "Feb 1, 2025 – Feb 8, 2025",
+  "positive": 120,
+  "negative": -10,
+  "data": [
+    { "date": "Feb 1, 2025", "rents": 5, "money": "$15" },
+    { "date": "Feb 2, 2025", "rents": 6, "money": "$18" }
+  ]
+}
+```
+
+### 24. Rents from (date to today)
+
+Aggregated rents from a given date through today. Correlates to `stripe/balance-transactions?from=YYYY-MM-DD` (to omitted = today in Chicago).
+
+**Endpoint:** `GET /rents/from`
+
+**Query parameters**
+
+- `from` (required): `YYYY-MM-DD` start date.
+
+**Example**
+
+```bash
+curl "https://api.cuub.tech/rents/from?from=2025-02-01"
+```
+
+**Expected response**
+
+Same shape as **23. Rents range** (e.g. `range`, `positive`, `negative`, `data`).
+
+### 25. Rents recent (limit only)
+
+Aggregated rents for the most recent N balance transactions, with no date filter. Correlates to `stripe/balance-transactions?limit=N`. Days in `data` are those that appear in the last N transactions.
+
+**Endpoint:** `GET /rents/recent`
+
+**Query parameters**
+
+- `limit` (optional): number of balance transactions to include (default 10, max 100).
+
+**Example**
+
+```bash
+curl "https://api.cuub.tech/rents/recent?limit=10"
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "positive": 45,
+  "negative": -3,
+  "data": [
+    { "date": "Feb 8, 2026", "rents": 2, "money": "$6" },
+    { "date": "Feb 9, 2026", "rents": 1, "money": "$3" }
   ]
 }
 ```

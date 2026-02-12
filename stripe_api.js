@@ -74,6 +74,35 @@ const REVENUE_TYPES = new Set([
 ]);
 
 /**
+ * Aggregate balance transactions into positive/negative totals and per-day rents/money.
+ * @param {Array} balanceTransactions - from Stripe
+ * @param {string[]} [dayKeys] - optional sorted list of YYYY-MM-DD keys; if provided, byDay is pre-initialized with these days
+ * @returns {{ positiveCents: number, negativeCents: number, byDay: Object }}
+ */
+function aggregateRents(balanceTransactions, dayKeys = null) {
+  const byDay = {};
+  if (Array.isArray(dayKeys)) {
+    for (const key of dayKeys) {
+      byDay[key] = { date: formatDateLabel(key), rents: 0, netCents: 0 };
+    }
+  }
+  let positiveCents = 0;
+  let negativeCents = 0;
+  for (const bt of balanceTransactions) {
+    const net = bt.net != null ? bt.net : 0;
+    const type = bt.type || '';
+    const key = chicagoDateStringFromUnix(bt.created);
+    if (!REVENUE_TYPES.has(type)) continue;
+    if (net > 0) positiveCents += net;
+    else if (net < 0) negativeCents += net;
+    if (!byDay[key]) byDay[key] = { date: formatDateLabel(key), rents: 0, netCents: 0 };
+    byDay[key].netCents += net;
+    if (type === 'charge' && net > 0) byDay[key].rents += 1;
+  }
+  return { positiveCents, negativeCents, byDay };
+}
+
+/**
  * GET /rents/mtd
  * Returns month-to-date rents: per-day count and sum from charges only; positive/negative from allowed revenue types only.
  */
@@ -193,6 +222,141 @@ router.get('/rents/mtd', async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Failed to fetch rents mtd',
+    });
+  }
+});
+
+/**
+ * GET /rents/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Aggregated rents for a date range (same shape as /rents/mtd, no prev-month fields).
+ */
+router.get('/rents/range', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
+  }
+  const fromParam = req.query.from;
+  const toParam = req.query.to;
+  if (!fromParam || !toParam) {
+    return res.status(400).json({ success: false, error: 'Query params from and to (YYYY-MM-DD) are required.' });
+  }
+  try {
+    const gte = parseDateToUnixSeconds(fromParam, false);
+    const lte = parseDateToUnixSeconds(toParam, true);
+    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    if (fromDt > toDt) {
+      return res.status(400).json({ success: false, error: 'from must be on or before to.' });
+    }
+    const dayKeys = [];
+    let d = fromDt;
+    while (d <= toDt) {
+      dayKeys.push(d.toISODate().slice(0, 10));
+      d = d.plus({ days: 1 });
+    }
+    const balanceTransactions = await fetchAllBalanceTransactionsInRange(gte, lte);
+    const { positiveCents, negativeCents, byDay } = aggregateRents(balanceTransactions, dayKeys);
+    const data = dayKeys.map((key) => ({
+      date: byDay[key].date,
+      rents: byDay[key].rents,
+      money: '$' + (byDay[key].netCents / 100).toFixed(0),
+    }));
+    res.json({
+      success: true,
+      range: `${formatDateLabel(fromParam)} – ${formatDateLabel(toParam)}`,
+      positive: positiveCents / 100,
+      negative: negativeCents / 100,
+      data,
+    });
+  } catch (error) {
+    console.error('Stripe API error (rents/range):', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Failed to fetch rents range',
+    });
+  }
+});
+
+/**
+ * GET /rents/from?from=YYYY-MM-DD
+ * Aggregated rents from a date to today (to omitted = today in Chicago).
+ */
+router.get('/rents/from', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
+  }
+  const fromParam = req.query.from;
+  if (!fromParam) {
+    return res.status(400).json({ success: false, error: 'Query param from (YYYY-MM-DD) is required.' });
+  }
+  try {
+    const chicagoNow = DateTime.now().setZone(CHICAGO_ZONE);
+    const toParam = chicagoNow.toISODate().slice(0, 10);
+    const gte = parseDateToUnixSeconds(fromParam, false);
+    const lte = parseDateToUnixSeconds(toParam, true);
+    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    if (fromDt > toDt) {
+      return res.status(400).json({ success: false, error: 'from must be on or before today.' });
+    }
+    const dayKeys = [];
+    let d = fromDt;
+    while (d <= toDt) {
+      dayKeys.push(d.toISODate().slice(0, 10));
+      d = d.plus({ days: 1 });
+    }
+    const balanceTransactions = await fetchAllBalanceTransactionsInRange(gte, lte);
+    const { positiveCents, negativeCents, byDay } = aggregateRents(balanceTransactions, dayKeys);
+    const data = dayKeys.map((key) => ({
+      date: byDay[key].date,
+      rents: byDay[key].rents,
+      money: '$' + (byDay[key].netCents / 100).toFixed(0),
+    }));
+    res.json({
+      success: true,
+      range: `${formatDateLabel(fromParam)} – ${formatDateLabel(toParam)}`,
+      positive: positiveCents / 100,
+      negative: negativeCents / 100,
+      data,
+    });
+  } catch (error) {
+    console.error('Stripe API error (rents/from):', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Failed to fetch rents from',
+    });
+  }
+});
+
+/**
+ * GET /rents/recent?limit=N
+ * Aggregated rents for the most recent N balance transactions (no date filter). Default limit 10, max 100.
+ */
+router.get('/rents/recent', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
+  }
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
+    const listResult = await stripe.balanceTransactions.list({ limit });
+    const balanceTransactions = listResult.data;
+    const { positiveCents, negativeCents, byDay } = aggregateRents(balanceTransactions);
+    const dayKeys = Object.keys(byDay).sort();
+    const data = dayKeys.map((key) => ({
+      date: byDay[key].date,
+      rents: byDay[key].rents,
+      money: '$' + (byDay[key].netCents / 100).toFixed(0),
+    }));
+    res.json({
+      success: true,
+      positive: positiveCents / 100,
+      negative: negativeCents / 100,
+      data,
+    });
+  } catch (error) {
+    console.error('Stripe API error (rents/recent):', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Failed to fetch rents recent',
     });
   }
 });
