@@ -83,7 +83,7 @@ async function getTokenFromDatabase() {
  * Helper function to fetch battery availability from Relink API
  * @param {string} stationId - The station ID
  * @param {string} token - The authorization token
- * @returns {Promise<{filled_slots: number, open_slots: number}>}
+ * @returns {Promise<{filled_slots: number, open_slots: number, online: boolean}>}
  */
 async function getBatteryAvailability(stationId, token) {
   try {
@@ -99,24 +99,25 @@ async function getBatteryAvailability(stationId, token) {
 
     if (!response.ok) {
       console.error(`Relink API error for station ${stationId}: ${response.status} ${response.statusText}`);
-      return { filled_slots: null, open_slots: null };
+      return { filled_slots: null, open_slots: null, online: false };
     }
 
     const data = await response.json();
     
-    // Extract data from the response
+    // Extract data from the response; online = cabinet responded with positionInfo
     if (data.content && data.content.length > 0 && data.content[0].positionInfo) {
       const positionInfo = data.content[0].positionInfo;
       return {
         filled_slots: positionInfo.borrowNum || 0,  // borrowNum = slots with batteries
-        open_slots: positionInfo.returnNum || 0      // returnNum = empty slots
+        open_slots: positionInfo.returnNum || 0,    // returnNum = empty slots
+        online: true
       };
     }
     
-    return { filled_slots: null, open_slots: null };
+    return { filled_slots: null, open_slots: null, online: false };
   } catch (error) {
     console.error(`Error fetching battery availability for station ${stationId}:`, error);
-    return { filled_slots: null, open_slots: null };
+    return { filled_slots: null, open_slots: null, online: false };
   }
 }
 
@@ -147,13 +148,15 @@ router.get('/stations', async (req, res) => {
           return {
             ...station,
             filled_slots: batteryInfo.filled_slots,
-            open_slots: batteryInfo.open_slots
+            open_slots: batteryInfo.open_slots,
+            online: batteryInfo.online
           };
         } else {
           return {
             ...station,
             filled_slots: null,
-            open_slots: null
+            open_slots: null,
+            online: false
           };
         }
       })
@@ -234,13 +237,15 @@ router.get('/stations/:id', async (req, res) => {
       station = {
         ...station,
         filled_slots: batteryInfo.filled_slots,
-        open_slots: batteryInfo.open_slots
+        open_slots: batteryInfo.open_slots,
+        online: batteryInfo.online
       };
     } else {
       station = {
         ...station,
         filled_slots: null,
-        open_slots: null
+        open_slots: null,
+        online: false
       };
     }
     
@@ -320,13 +325,15 @@ router.get('/stations/export', async (req, res) => {
           return {
             ...station,
             filled_slots: batteryInfo.filled_slots,
-            open_slots: batteryInfo.open_slots
+            open_slots: batteryInfo.open_slots,
+            online: batteryInfo.online
           };
         } else {
           return {
             ...station,
             filled_slots: null,
-            open_slots: null
+            open_slots: null,
+            online: false
           };
         }
       })
@@ -350,7 +357,8 @@ router.get('/stations/export', async (req, res) => {
       'screen_id',
       'sim_id',
       'filled_slots',
-      'open_slots'
+      'open_slots',
+      'online'
     ];
     
     // Convert data to CSV
