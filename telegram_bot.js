@@ -195,16 +195,16 @@ function formatStationStatus(stations) {
     return filledSlotsNum <= 3;
   });
   
-  if (redYellowStations.length === 0) {
-    return 'Network is healthy!';
-  }
-  
-  // Sort stations: Red first, then Yellow
-  const sortedStations = [...redYellowStations].sort((a, b) => {
-    return getStationPriority(a) - getStationPriority(b);
-  });
+  // Sort stations: Red first, then Yellow (when we have any)
+  const sortedStations = redYellowStations.length === 0
+    ? []
+    : [...redYellowStations].sort((a, b) => getStationPriority(a) - getStationPriority(b));
   
   let message = '';
+  
+  if (sortedStations.length === 0) {
+    message = 'Network is healthy!';
+  }
   
   sortedStations.forEach((station) => {
     const title = station.title || 'Unknown';
@@ -249,6 +249,16 @@ function formatStationStatus(stations) {
       message += `${colorSquare} Filled: ${filledSlotsNum} / ${totalSlots}\n\n`;
     }
   });
+  
+  // Offline stations (online === false)
+  const offlineStations = (stations || []).filter((station) => station.online === false);
+  if (offlineStations.length > 0) {
+    message += '--\n';
+    offlineStations.forEach((station) => {
+      const title = station.title || 'Unknown';
+      message += `${title}\n🔴 Offline\n\n`;
+    });
+  }
   
   // Add route link with red and yellow stations
   const routeLink = generateRouteLink(stations);
