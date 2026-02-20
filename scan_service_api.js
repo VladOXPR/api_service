@@ -154,12 +154,14 @@ async function getOrderData(manufactureId, token) {
     // Looking for the first order in the content array
     if (data.content && data.content.length > 0) {
       const order = data.content[0];
-      // Use endtime as returnTime if returnTime is 0 or missing
-      const returnTimeValue = (order.returnTime && order.returnTime !== 0) ? order.returnTime : order.endtime;
-      
+      // Preserve raw returnTime (including 0) so callers can tell "not returned" vs "returned"
+      const returnTimeRaw = order.returnTime !== undefined && order.returnTime !== null
+        ? Number(order.returnTime)
+        : (order.endtime != null ? Number(order.endtime) : null);
+
       return {
         starttime: order.starttime || null,
-        returnTime: returnTimeValue || null
+        returnTime: returnTimeRaw
       };
     }
     
@@ -315,20 +317,24 @@ router.get('/battery/:sticker_id', async (req, res) => {
     // Fetch order data from Relink API
     const orderData = await getOrderData(manufacture_id, token);
 
-    // Calculate duration and amount
+    // Simplified duration logic: returnTime 0 = not returned; non-zero = returned
     const startTime = orderData.starttime ? Number(orderData.starttime) : null;
-    const returnTime = orderData.returnTime ? Number(orderData.returnTime) : null;
-    const duration = calculateDuration(startTime, returnTime);
-    const amountPaid = calculateAmountPaid(startTime, returnTime);
+    const returnTime = orderData.returnTime != null ? Number(orderData.returnTime) : null;
+    const isReturned = returnTime != null && returnTime !== 0;
+
+    const duration = isReturned
+      ? 'Battery returned'
+      : formatDuration(startTime ? Date.now() - startTime : 0);
+    const amountPaid = calculateAmountPaid(startTime, isReturned ? returnTime : null);
 
     // Build response
     const responseData = {
       manufacture_id: manufacture_id,
       sticker_id: sticker_id,
       startTime: startTime ? String(startTime) : null,
-      returnTime: returnTime ? String(returnTime) : null,
-      duration: duration,
-      amountPaid: amountPaid
+      returnTime: returnTime != null ? String(returnTime) : null,
+      duration,
+      amountPaid
     };
 
     res.json({
