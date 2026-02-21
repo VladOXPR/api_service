@@ -125,8 +125,8 @@ app.get('/health', (req, res) => {
 // Middleware
 app.use(express.json());
 
-// Mount Stripe routes BEFORE user routes so /rents/mtd and /rents/mtd/:station_id match first
-// (user routes has /rents/:station_id/:dateRange which would otherwise match /rents/mtd/:id)
+// Mount Stripe routes BEFORE user routes so /rents/:dateRange and /rents/:dateRange/all match first
+// (user routes has /rents/:station_id/:dateRange which has two path segments)
 app.use('/', stripeRoutes);
 console.log('🔗 Stripe routes mounted at root path');
 

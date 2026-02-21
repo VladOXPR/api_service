@@ -35,20 +35,30 @@ function chicagoDateStringFromUnix(unixSeconds) {
 }
 
 /**
- * Parse a date string (YYYY-MM-DD) or "mtd" to Unix seconds. All in America/Chicago.
- * "mtd" = start of current month in Chicago.
- * YYYY-MM-DD = that day in Chicago (start or end of day).
+ * Parse a date string (YYYY-MM-DD) to Unix seconds. America/Chicago.
+ * endOfDay: if true, use end of day; else start of day.
  */
 function parseDateToUnixSeconds(value, endOfDay = false) {
-  let dt;
-  if (value === 'mtd' || value === undefined) {
-    dt = DateTime.now().setZone(CHICAGO_ZONE).startOf('month');
-  } else {
-    dt = DateTime.fromISO(value + 'T00:00:00', { zone: CHICAGO_ZONE });
-    if (endOfDay) dt = dt.endOf('day');
-    else dt = dt.startOf('day');
-  }
-  return Math.floor(dt.toSeconds());
+  const dt = DateTime.fromISO(value + 'T00:00:00', { zone: CHICAGO_ZONE });
+  const d = endOfDay ? dt.endOf('day') : dt.startOf('day');
+  return Math.floor(d.toSeconds());
+}
+
+/**
+ * Parse path param dateRange "YYYY-MM-DD_YYYY-MM-DD" into { fromStr, toStr }.
+ * Returns null if invalid.
+ */
+function parseDateRangeParam(dateRange) {
+  if (!dateRange || typeof dateRange !== 'string') return null;
+  const parts = dateRange.split('_');
+  if (parts.length !== 2) return null;
+  const [fromStr, toStr] = parts.map((s) => s.trim());
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  if (!re.test(fromStr) || !re.test(toStr)) return null;
+  const fromDt = DateTime.fromISO(fromStr + 'T00:00:00', { zone: CHICAGO_ZONE });
+  const toDt = DateTime.fromISO(toStr + 'T00:00:00', { zone: CHICAGO_ZONE });
+  if (!fromDt.isValid || !toDt.isValid || fromDt > toDt) return null;
+  return { fromStr, toStr };
 }
 
 /**
@@ -177,53 +187,55 @@ function aggregateCharges(charges, dayKeys = null) {
 }
 
 /**
- * GET /rents/mtd
- * Returns month-to-date rents from Stripe balance transactions. positive/negative filtered by REVENUE_TYPES (charge, payment, refund, etc.); per-day net and rents.
+ * GET /rents/:dateRange
+ * dateRange format: YYYY-MM-DD_YYYY-MM-DD (e.g. 2025-02-01_2025-02-08).
+ * Aggregated rents for that range from Stripe balance transactions. Includes previous-month comparison.
  */
-router.get('/rents/mtd', async (req, res) => {
+router.get('/rents/:dateRange', async (req, res) => {
   if (!stripe) {
     return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
   }
+  const parsed = parseDateRangeParam(req.params.dateRange);
+  if (!parsed) {
+    return res.status(400).json({ success: false, error: 'Invalid dateRange. Use YYYY-MM-DD_YYYY-MM-DD (e.g. 2025-02-01_2025-02-08).' });
+  }
+  const { fromStr: fromParam, toStr: toParam } = parsed;
   try {
-    const chicagoNow = DateTime.now().setZone(CHICAGO_ZONE);
-    const monthStart = chicagoNow.startOf('month');
-    const todayStart = chicagoNow.startOf('day');
-    const gte = Math.floor(monthStart.toSeconds());
-    const lte = Math.floor(DateTime.now().toSeconds());
-
-    const prevMonthStart = monthStart.minus({ months: 1 });
-    const prevMonthSameDay = todayStart.minus({ months: 1 });
-    const gtePrev = Math.floor(prevMonthStart.toSeconds());
-    const ltePrev = Math.floor(prevMonthSameDay.endOf('day').toSeconds());
+    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    const dayKeys = [];
+    let d = fromDt;
+    while (d <= toDt) {
+      dayKeys.push(d.toISODate().slice(0, 10));
+      d = d.plus({ days: 1 });
+    }
+    const prevFromDt = fromDt.minus({ months: 1 });
+    const prevToDt = toDt.minus({ months: 1 });
+    const prevFromParam = prevFromDt.toISODate().slice(0, 10);
+    const prevToParam = prevToDt.toISODate().slice(0, 10);
+    const gte = parseDateToUnixSeconds(fromParam, false);
+    const lte = parseDateToUnixSeconds(toParam, true);
+    const gtePrev = parseDateToUnixSeconds(prevFromParam, false);
+    const ltePrev = parseDateToUnixSeconds(prevToParam, true);
 
     const [balanceTransactions, prevBalanceTransactions] = await Promise.all([
       fetchAllBalanceTransactionsInRange(gte, lte),
       fetchAllBalanceTransactionsInRange(gtePrev, ltePrev),
     ]);
 
-    const dayCount = Math.round(todayStart.diff(monthStart, 'days').days) + 1;
-    const dayKeys = [];
-    for (let i = 0; i < dayCount; i++) {
-      const d = monthStart.plus({ days: i });
-      dayKeys.push(d.toISODate().slice(0, 10));
-    }
-
-    const prevDayCount = Math.round(prevMonthSameDay.diff(prevMonthStart, 'days').days) + 1;
     const prevDayKeys = [];
-    for (let i = 0; i < prevDayCount; i++) {
-      const d = prevMonthStart.plus({ days: i });
-      prevDayKeys.push(d.toISODate().slice(0, 10));
+    let dp = prevFromDt;
+    while (dp <= prevToDt) {
+      prevDayKeys.push(dp.toISODate().slice(0, 10));
+      dp = dp.plus({ days: 1 });
     }
 
     const { positiveCents, negativeCents, byDay } = aggregateRents(balanceTransactions, dayKeys);
     const { positiveCents: ppositiveCents, negativeCents: pnegativeCents, byDay: byDayPrev } = aggregateRents(prevBalanceTransactions, prevDayKeys);
 
-    const firstDayStr = monthStart.toISODate().slice(0, 10);
-    const lastDayStr = todayStart.toISODate().slice(0, 10);
-
     const data = dayKeys.map((key) => {
-      const [y, m, d] = key.split('-').map(Number);
-      const prevKey = DateTime.fromObject({ year: y, month: m, day: d }, { zone: CHICAGO_ZONE })
+      const [y, m, day] = key.split('-').map(Number);
+      const prevKey = DateTime.fromObject({ year: y, month: m, day }, { zone: CHICAGO_ZONE })
         .minus({ months: 1 })
         .toISODate()
         .slice(0, 10);
@@ -239,7 +251,7 @@ router.get('/rents/mtd', async (req, res) => {
 
     res.json({
       success: true,
-      mtd: `${formatDateLabel(firstDayStr)} – ${formatDateLabel(lastDayStr)}`,
+      range: `${formatDateLabel(fromParam)} – ${formatDateLabel(toParam)}`,
       positive: positiveCents / 100,
       negative: negativeCents / 100,
       ppositive: ppositiveCents / 100,
@@ -247,28 +259,31 @@ router.get('/rents/mtd', async (req, res) => {
       data,
     });
   } catch (error) {
-    console.error('Stripe API error (rents/mtd):', error);
+    console.error('Stripe API error (rents/:dateRange):', error);
     res.status(error.statusCode || 500).json({
       success: false,
-      error: error.message || 'Failed to fetch rents mtd',
+      error: error.message || 'Failed to fetch rents for date range',
     });
   }
 });
 
 /**
- * GET /rents/mtd/all
- * Returns net revenue (money) per station for month-to-date. Fetches stripe/charges?from=mtd, groups by charge.customer (stripe_id), maps to stations table for id/title, money = positive - negative (same logic as /rents/mtd/:station_id).
+ * GET /rents/:dateRange/all
+ * dateRange format: YYYY-MM-DD_YYYY-MM-DD. Returns net revenue per station for that range.
  */
-router.get('/rents/mtd/all', async (req, res) => {
+router.get('/rents/:dateRange/all', async (req, res) => {
   if (!stripe) {
     return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
   }
+  const parsed = parseDateRangeParam(req.params.dateRange);
+  if (!parsed) {
+    return res.status(400).json({ success: false, error: 'Invalid dateRange. Use YYYY-MM-DD_YYYY-MM-DD (e.g. 2025-02-01_2025-02-08).' });
+  }
+  const { fromStr, toStr } = parsed;
   let client;
   try {
-    const chicagoNow = DateTime.now().setZone(CHICAGO_ZONE);
-    const monthStart = chicagoNow.startOf('month');
-    const gte = Math.floor(monthStart.toSeconds());
-    const lte = Math.floor(DateTime.now().toSeconds());
+    const gte = parseDateToUnixSeconds(fromStr, false);
+    const lte = parseDateToUnixSeconds(toStr, true);
 
     const charges = await fetchAllChargesInRange(gte, lte);
     const byStripeId = {};
@@ -282,7 +297,7 @@ router.get('/rents/mtd/all', async (req, res) => {
     if (stripeIds.length === 0) {
       return res.json({
         success: true,
-        mtd: `${formatDateLabel(monthStart.toISODate().slice(0, 10))} – ${formatDateLabel(DateTime.now().setZone(CHICAGO_ZONE).toISODate().slice(0, 10))}`,
+        range: `${formatDateLabel(fromStr)} – ${formatDateLabel(toStr)}`,
         data: [],
       });
     }
@@ -297,9 +312,6 @@ router.get('/rents/mtd/all', async (req, res) => {
       const sid = (r.stripe_id || '').trim();
       if (sid) stationByStripeId[sid] = r;
     }
-
-    const firstDayStr = monthStart.toISODate().slice(0, 10);
-    const lastDayStr = DateTime.now().setZone(CHICAGO_ZONE).toISODate().slice(0, 10);
 
     const data = [];
     for (const sid of stripeIds) {
@@ -319,297 +331,17 @@ router.get('/rents/mtd/all', async (req, res) => {
 
     res.json({
       success: true,
-      mtd: `${formatDateLabel(firstDayStr)} – ${formatDateLabel(lastDayStr)}`,
+      range: `${formatDateLabel(fromStr)} – ${formatDateLabel(toStr)}`,
       data,
     });
   } catch (error) {
-    console.error('Stripe API error (rents/mtd/all):', error);
+    console.error('Stripe API error (rents/:dateRange/all):', error);
     res.status(error.statusCode || 500).json({
       success: false,
-      error: error.message || 'Failed to fetch rents mtd all',
+      error: error.message || 'Failed to fetch rents all for date range',
     });
   } finally {
     if (client) client.release();
-  }
-});
-
-/**
- * GET /rents/mtd/:station_id
- * Returns month-to-date rents for one or more stations from Stripe charges.
- * Multiple station IDs: use dot separator, e.g. /rents/mtd/CUBH242510000001.CUBT062510000029
- * Station is looked up in DB (stations.stripe_id = charge.customer). Same format as /rents/mtd.
- */
-router.get('/rents/mtd/:station_id', async (req, res) => {
-  if (!stripe) {
-    return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
-  }
-  const { station_id } = req.params;
-  if (!station_id || station_id.trim() === '') {
-    return res.status(400).json({ success: false, error: 'station_id is required.' });
-  }
-  const stationIds = station_id.split('.').map((s) => s.trim()).filter(Boolean);
-  if (stationIds.length === 0) {
-    return res.status(400).json({ success: false, error: 'At least one station_id is required.' });
-  }
-
-  let client;
-  try {
-    client = await pool.connect();
-    const stationResult = await client.query(
-      'SELECT id, title, stripe_id FROM stations WHERE id = ANY($1) AND stripe_id IS NOT NULL AND stripe_id != \'\'',
-      [stationIds]
-    );
-    const validStations = stationResult.rows.filter((r) => r.stripe_id && r.stripe_id.trim() !== '');
-    if (validStations.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'No stations found or none have stripe_id configured.',
-        requested: stationIds,
-      });
-    }
-    const stripeIds = validStations.map((r) => r.stripe_id.trim());
-
-    const chicagoNow = DateTime.now().setZone(CHICAGO_ZONE);
-    const monthStart = chicagoNow.startOf('month');
-    const todayStart = chicagoNow.startOf('day');
-    const gte = Math.floor(monthStart.toSeconds());
-    const lte = Math.floor(DateTime.now().toSeconds());
-
-    const prevMonthStart = monthStart.minus({ months: 1 });
-    const prevMonthSameDay = todayStart.minus({ months: 1 });
-    const gtePrev = Math.floor(prevMonthStart.toSeconds());
-    const ltePrev = Math.floor(prevMonthSameDay.endOf('day').toSeconds());
-
-    const currentMonthChargePromises = stripeIds.map((sid) => fetchAllChargesInRange(gte, lte, sid));
-    const prevMonthChargePromises = stripeIds.map((sid) => fetchAllChargesInRange(gtePrev, ltePrev, sid));
-    const [currentArrays, prevArrays] = await Promise.all([
-      Promise.all(currentMonthChargePromises),
-      Promise.all(prevMonthChargePromises),
-    ]);
-    const charges = currentArrays.flat();
-    const prevCharges = prevArrays.flat();
-
-    const dayCount = Math.round(todayStart.diff(monthStart, 'days').days) + 1;
-    const dayKeys = [];
-    for (let i = 0; i < dayCount; i++) {
-      const d = monthStart.plus({ days: i });
-      dayKeys.push(d.toISODate().slice(0, 10));
-    }
-
-    const prevDayCount = Math.round(prevMonthSameDay.diff(prevMonthStart, 'days').days) + 1;
-    const prevDayKeys = [];
-    for (let i = 0; i < prevDayCount; i++) {
-      const d = prevMonthStart.plus({ days: i });
-      prevDayKeys.push(d.toISODate().slice(0, 10));
-    }
-
-    const { positiveCents, negativeCents, byDay } = aggregateCharges(charges, dayKeys);
-    const { positiveCents: ppositiveCents, negativeCents: pnegativeCents, byDay: byDayPrev } = aggregateCharges(prevCharges, prevDayKeys);
-
-    const firstDayStr = monthStart.toISODate().slice(0, 10);
-    const lastDayStr = todayStart.toISODate().slice(0, 10);
-
-    const data = dayKeys.map((key) => {
-      const [y, m, d] = key.split('-').map(Number);
-      const prevKey = DateTime.fromObject({ year: y, month: m, day: d }, { zone: CHICAGO_ZONE })
-        .minus({ months: 1 })
-        .toISODate()
-        .slice(0, 10);
-      const prev = byDayPrev[prevKey];
-      return {
-        date: byDay[key].date,
-        rents: byDay[key].rents,
-        money: '$' + (byDay[key].netCents / 100).toFixed(0),
-        prents: prev ? prev.rents : 0,
-        pmoney: prev ? '$' + (prev.netCents / 100).toFixed(0) : '$0',
-      };
-    });
-
-    res.json({
-      success: true,
-      station_ids: validStations.map((r) => r.id),
-      mtd: `${formatDateLabel(firstDayStr)} – ${formatDateLabel(lastDayStr)}`,
-      positive: positiveCents / 100,
-      negative: -(negativeCents / 100),
-      ppositive: ppositiveCents / 100,
-      pnegative: -(pnegativeCents / 100),
-      data,
-    });
-  } catch (error) {
-    console.error('Stripe API error (rents/mtd/:station_id):', error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      error: error.message || 'Failed to fetch rents mtd for station',
-    });
-  } finally {
-    if (client) client.release();
-  }
-});
-
-/**
- * GET /rents/range?from=YYYY-MM-DD&to=YYYY-MM-DD
- * Aggregated rents for a date range. Includes previous-month comparison (ppositive, pnegative, prents, pmoney) like /rents/mtd.
- */
-router.get('/rents/range', async (req, res) => {
-  if (!stripe) {
-    return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
-  }
-  const fromParam = req.query.from;
-  const toParam = req.query.to;
-  if (!fromParam || !toParam) {
-    return res.status(400).json({ success: false, error: 'Query params from and to (YYYY-MM-DD) are required.' });
-  }
-  try {
-    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
-    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
-    if (fromDt > toDt) {
-      return res.status(400).json({ success: false, error: 'from must be on or before to.' });
-    }
-    const dayKeys = [];
-    let d = fromDt;
-    while (d <= toDt) {
-      dayKeys.push(d.toISODate().slice(0, 10));
-      d = d.plus({ days: 1 });
-    }
-    const prevFromDt = fromDt.minus({ months: 1 });
-    const prevToDt = toDt.minus({ months: 1 });
-    const prevFromParam = prevFromDt.toISODate().slice(0, 10);
-    const prevToParam = prevToDt.toISODate().slice(0, 10);
-    const gte = parseDateToUnixSeconds(fromParam, false);
-    const lte = parseDateToUnixSeconds(toParam, true);
-    const gtePrev = parseDateToUnixSeconds(prevFromParam, false);
-    const ltePrev = parseDateToUnixSeconds(prevToParam, true);
-
-    const [balanceTransactions, prevBalanceTransactions] = await Promise.all([
-      fetchAllBalanceTransactionsInRange(gte, lte),
-      fetchAllBalanceTransactionsInRange(gtePrev, ltePrev),
-    ]);
-
-    const prevDayKeys = [];
-    let dp = prevFromDt;
-    while (dp <= prevToDt) {
-      prevDayKeys.push(dp.toISODate().slice(0, 10));
-      dp = dp.plus({ days: 1 });
-    }
-
-    const { positiveCents, negativeCents, byDay } = aggregateRents(balanceTransactions, dayKeys);
-    const { positiveCents: ppositiveCents, negativeCents: pnegativeCents, byDay: byDayPrev } = aggregateRents(prevBalanceTransactions, prevDayKeys);
-
-    const data = dayKeys.map((key) => {
-      const [y, m, day] = key.split('-').map(Number);
-      const prevKey = DateTime.fromObject({ year: y, month: m, day }, { zone: CHICAGO_ZONE })
-        .minus({ months: 1 })
-        .toISODate()
-        .slice(0, 10);
-      const prev = byDayPrev[prevKey];
-      return {
-        date: byDay[key].date,
-        rents: byDay[key].rents,
-        money: '$' + (byDay[key].netCents / 100).toFixed(0),
-        prents: prev ? prev.rents : 0,
-        pmoney: prev ? '$' + (prev.netCents / 100).toFixed(0) : '$0',
-      };
-    });
-
-    res.json({
-      success: true,
-      range: `${formatDateLabel(fromParam)} – ${formatDateLabel(toParam)}`,
-      positive: positiveCents / 100,
-      negative: negativeCents / 100,
-      ppositive: ppositiveCents / 100,
-      pnegative: pnegativeCents / 100,
-      data,
-    });
-  } catch (error) {
-    console.error('Stripe API error (rents/range):', error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      error: error.message || 'Failed to fetch rents range',
-    });
-  }
-});
-
-/**
- * GET /rents/from?from=YYYY-MM-DD
- * Aggregated rents from a date to today (to omitted = today in Chicago). Includes previous-month comparison like /rents/range.
- */
-router.get('/rents/from', async (req, res) => {
-  if (!stripe) {
-    return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
-  }
-  const fromParam = req.query.from;
-  if (!fromParam) {
-    return res.status(400).json({ success: false, error: 'Query param from (YYYY-MM-DD) is required.' });
-  }
-  try {
-    const chicagoNow = DateTime.now().setZone(CHICAGO_ZONE);
-    const toParam = chicagoNow.toISODate().slice(0, 10);
-    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
-    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
-    if (fromDt > toDt) {
-      return res.status(400).json({ success: false, error: 'from must be on or before today.' });
-    }
-    const dayKeys = [];
-    let d = fromDt;
-    while (d <= toDt) {
-      dayKeys.push(d.toISODate().slice(0, 10));
-      d = d.plus({ days: 1 });
-    }
-    const prevFromDt = fromDt.minus({ months: 1 });
-    const prevToDt = toDt.minus({ months: 1 });
-    const prevFromParam = prevFromDt.toISODate().slice(0, 10);
-    const prevToParam = prevToDt.toISODate().slice(0, 10);
-    const gte = parseDateToUnixSeconds(fromParam, false);
-    const lte = parseDateToUnixSeconds(toParam, true);
-    const gtePrev = parseDateToUnixSeconds(prevFromParam, false);
-    const ltePrev = parseDateToUnixSeconds(prevToParam, true);
-
-    const [balanceTransactions, prevBalanceTransactions] = await Promise.all([
-      fetchAllBalanceTransactionsInRange(gte, lte),
-      fetchAllBalanceTransactionsInRange(gtePrev, ltePrev),
-    ]);
-
-    const prevDayKeys = [];
-    let dp = prevFromDt;
-    while (dp <= prevToDt) {
-      prevDayKeys.push(dp.toISODate().slice(0, 10));
-      dp = dp.plus({ days: 1 });
-    }
-
-    const { positiveCents, negativeCents, byDay } = aggregateRents(balanceTransactions, dayKeys);
-    const { positiveCents: ppositiveCents, negativeCents: pnegativeCents, byDay: byDayPrev } = aggregateRents(prevBalanceTransactions, prevDayKeys);
-
-    const data = dayKeys.map((key) => {
-      const [y, m, day] = key.split('-').map(Number);
-      const prevKey = DateTime.fromObject({ year: y, month: m, day }, { zone: CHICAGO_ZONE })
-        .minus({ months: 1 })
-        .toISODate()
-        .slice(0, 10);
-      const prev = byDayPrev[prevKey];
-      return {
-        date: byDay[key].date,
-        rents: byDay[key].rents,
-        money: '$' + (byDay[key].netCents / 100).toFixed(0),
-        prents: prev ? prev.rents : 0,
-        pmoney: prev ? '$' + (prev.netCents / 100).toFixed(0) : '$0',
-      };
-    });
-
-    res.json({
-      success: true,
-      range: `${formatDateLabel(fromParam)} – ${formatDateLabel(toParam)}`,
-      positive: positiveCents / 100,
-      negative: negativeCents / 100,
-      ppositive: ppositiveCents / 100,
-      pnegative: pnegativeCents / 100,
-      data,
-    });
-  } catch (error) {
-    console.error('Stripe API error (rents/from):', error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      error: error.message || 'Failed to fetch rents from',
-    });
   }
 });
 
@@ -648,38 +380,31 @@ router.get('/rents/recent', async (req, res) => {
 });
 
 /**
- * GET /stripe/charges
- * Returns Stripe charges (stripe.charges.list), optionally filtered by date range.
- * Query:
- *   - limit (optional, default 10, max 100) when no date filter.
- *   - from (optional): YYYY-MM-DD or "mtd" for month-to-date (first day of current month).
- *   - to (optional): YYYY-MM-DD; defaults to today when "from" is set.
+ * GET /stripe/charges?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Returns all Stripe charges in the date range (paginates until done). from and to required.
  */
 router.get('/stripe/charges', async (req, res) => {
   if (!stripe) {
     return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
   }
+  const fromParam = req.query.from;
+  const toParam = req.query.to;
+  if (!fromParam || !toParam) {
+    return res.status(400).json({ success: false, error: 'Query params from and to (YYYY-MM-DD) are required.' });
+  }
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 100);
-    const fromParam = req.query.from;
-    const toParam = req.query.to;
-
-    const listParams = { limit };
-
-    if (fromParam !== undefined && fromParam !== '') {
-      const gte = parseDateToUnixSeconds(fromParam === 'mtd' ? 'mtd' : fromParam, false);
-      const lte = toParam
-        ? parseDateToUnixSeconds(toParam, true)
-        : parseDateToUnixSeconds(DateTime.now().setZone(CHICAGO_ZONE).toISODate().slice(0, 10), true);
-      listParams.created = { gte, lte };
+    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    if (fromDt > toDt) {
+      return res.status(400).json({ success: false, error: 'from must be on or before to.' });
     }
-
-    const charges = await stripe.charges.list(listParams);
-
+    const gte = parseDateToUnixSeconds(fromParam, false);
+    const lte = parseDateToUnixSeconds(toParam, true);
+    const charges = await fetchAllChargesInRange(gte, lte);
     res.json({
       success: true,
-      data: charges.data,
-      has_more: charges.has_more,
+      data: charges,
+      has_more: false,
     });
   } catch (error) {
     console.error('Stripe API error:', error);
@@ -691,38 +416,31 @@ router.get('/stripe/charges', async (req, res) => {
 });
 
 /**
- * GET /stripe/balance-transactions
- * Returns Stripe balance transactions (stripe.balanceTransactions.list), optionally filtered by date range.
- * Query:
- *   - limit (optional, default 10, max 100) when no date filter.
- *   - from (optional): YYYY-MM-DD or "mtd" for month-to-date (first day of current month).
- *   - to (optional): YYYY-MM-DD; defaults to today when "from" is set.
+ * GET /stripe/balance-transactions?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Returns all Stripe balance transactions in the date range (paginates until done). from and to required.
  */
 router.get('/stripe/balance-transactions', async (req, res) => {
   if (!stripe) {
     return res.status(503).json({ success: false, error: 'Stripe is not configured. Set STRIPE_SECRET_KEY.' });
   }
+  const fromParam = req.query.from;
+  const toParam = req.query.to;
+  if (!fromParam || !toParam) {
+    return res.status(400).json({ success: false, error: 'Query params from and to (YYYY-MM-DD) are required.' });
+  }
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 100);
-    const fromParam = req.query.from;
-    const toParam = req.query.to;
-
-    const listParams = { limit };
-
-    if (fromParam !== undefined && fromParam !== '') {
-      const gte = parseDateToUnixSeconds(fromParam === 'mtd' ? 'mtd' : fromParam, false);
-      const lte = toParam
-        ? parseDateToUnixSeconds(toParam, true)
-        : parseDateToUnixSeconds(DateTime.now().setZone(CHICAGO_ZONE).toISODate().slice(0, 10), true);
-      listParams.created = { gte, lte };
+    const fromDt = DateTime.fromISO(fromParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    const toDt = DateTime.fromISO(toParam + 'T00:00:00', { zone: CHICAGO_ZONE });
+    if (fromDt > toDt) {
+      return res.status(400).json({ success: false, error: 'from must be on or before to.' });
     }
-
-    const balanceTransactions = await stripe.balanceTransactions.list(listParams);
-
+    const gte = parseDateToUnixSeconds(fromParam, false);
+    const lte = parseDateToUnixSeconds(toParam, true);
+    const balanceTransactions = await fetchAllBalanceTransactionsInRange(gte, lte);
     res.json({
       success: true,
-      data: balanceTransactions.data,
-      has_more: balanceTransactions.has_more,
+      data: balanceTransactions,
+      has_more: false,
     });
   } catch (error) {
     console.error('Stripe API error:', error);
