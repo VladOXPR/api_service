@@ -293,19 +293,10 @@ router.get('/rents/:dateRange/all', async (req, res) => {
       if (!byStripeId[sid]) byStripeId[sid] = [];
       byStripeId[sid].push(ch);
     }
-    const stripeIds = Object.keys(byStripeId).filter(Boolean);
-    if (stripeIds.length === 0) {
-      return res.json({
-        success: true,
-        range: `${formatDateLabel(fromStr)} – ${formatDateLabel(toStr)}`,
-        data: [],
-      });
-    }
 
     client = await pool.connect();
     const stationResult = await client.query(
-      'SELECT id, title, stripe_id FROM stations WHERE stripe_id = ANY($1)',
-      [stripeIds]
+      "SELECT id, title, stripe_id FROM stations WHERE stripe_id IS NOT NULL AND stripe_id != ''"
     );
     const stationByStripeId = {};
     for (const r of stationResult.rows) {
@@ -314,7 +305,7 @@ router.get('/rents/:dateRange/all', async (req, res) => {
     }
 
     const data = [];
-    for (const sid of stripeIds) {
+    for (const sid of Object.keys(stationByStripeId)) {
       const station = stationByStripeId[sid];
       if (!station) continue;
       const chargesForStation = byStripeId[sid] || [];
