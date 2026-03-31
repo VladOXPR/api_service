@@ -309,9 +309,169 @@ curl -X DELETE https://api.cuub.tech/stations/{id}
 
 ---
 
+## Tickets (maintenance)
+
+Maintenance tickets stored in Postgres (`tickets` table). `station_id` must exist in `stations`. `task` is one of the enum values listed under **Create a new ticket**.
+
+### 13. Fetch a list of all tickets
+
+```bash
+curl -X GET https://api.cuub.tech/tickets
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "location_name": "Kizami Sushi",
+      "station_id": "{station_id}",
+      "latitude": 41.88,
+      "longitude": -87.63,
+      "created_at": "2026-03-28T12:00:00.000Z",
+      "task": "Low Batteries",
+      "description": "Optional notes"
+    }
+  ],
+  "count": 1
+}
+```
+
+### 14. Fetch a single ticket by ID
+
+`{id}` is the numeric ticket primary key (not a station id).
+
+```bash
+curl -X GET https://api.cuub.tech/tickets/{id}
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "location_name": "Kizami Sushi",
+    "station_id": "{station_id}",
+    "latitude": 41.88,
+    "longitude": -87.63,
+    "created_at": "2026-03-28T12:00:00.000Z",
+    "task": "Low Batteries",
+    "description": "Optional notes"
+  }
+}
+```
+
+### 15. Create a new ticket
+
+```bash
+curl -X POST https://api.cuub.tech/tickets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "location_name": "Kizami Sushi",
+    "station_id": "{station_id}",
+    "latitude": 41.88,
+    "longitude": -87.63,
+    "task": "Low Batteries",
+    "description": "Optional notes"
+  }'
+```
+
+**Body fields**
+
+- `location_name` (required)
+- `station_id` (required): must match an existing `stations.id`
+- `latitude` (required): number between -90 and 90
+- `longitude` (required): number between -180 and 180
+- `task` (required): one of `High Batteries`, `Low Batteries`, `No Batteries`, `Add Stack`, `Broken Battery`, `High Failure Rates`, `Hardware Malfunction`, `Unusually Offline`, `Other`
+- `description` (optional)
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "location_name": "Kizami Sushi",
+    "station_id": "{station_id}",
+    "latitude": 41.88,
+    "longitude": -87.63,
+    "created_at": "2026-03-28T12:00:00.000Z",
+    "task": "Low Batteries",
+    "description": "Optional notes"
+  },
+  "message": "Ticket created successfully"
+}
+```
+
+### 16. Update a ticket
+
+Send at least one field. If updating coordinates, send both `latitude` and `longitude` together.
+
+```bash
+curl -X PATCH https://api.cuub.tech/tickets/{id} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "location_name": "Updated location name",
+    "task": "Hardware Malfunction",
+    "description": "Updated notes"
+  }'
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "location_name": "Updated location name",
+    "station_id": "{station_id}",
+    "latitude": 41.88,
+    "longitude": -87.63,
+    "created_at": "2026-03-28T12:00:00.000Z",
+    "task": "Hardware Malfunction",
+    "description": "Updated notes"
+  },
+  "message": "Ticket updated successfully"
+}
+```
+
+### 17. Delete a ticket
+
+```bash
+curl -X DELETE https://api.cuub.tech/tickets/{id}
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "message": "Ticket deleted successfully",
+  "data": {
+    "id": 1,
+    "location_name": "Kizami Sushi",
+    "station_id": "{station_id}",
+    "latitude": 41.88,
+    "longitude": -87.63,
+    "created_at": "2026-03-28T12:00:00.000Z",
+    "task": "Low Batteries",
+    "description": "Optional notes"
+  }
+}
+```
+
+---
+
 ## Battery & Scans
 
-### 13. Fetch battery information by sticker ID
+### 18. Fetch battery information by sticker ID
 
 ```bash
 curl -X GET https://api.cuub.tech/battery/{sticker_id}
@@ -333,7 +493,7 @@ curl -X GET https://api.cuub.tech/battery/{sticker_id}
 }
 ```
 
-### 14. Create a scan record (POST)
+### 19. Create a scan record (POST)
 
 Records a scan for a battery. `sticker_type` is taken from `battery.type` in the database.
 
@@ -365,7 +525,7 @@ curl -X POST https://api.cuub.tech/battery/{sticker_id} \
 }
 ```
 
-### 15. Update a scan record (PATCH)
+### 20. Update a scan record (PATCH)
 
 Updates the most recent scan for the given sticker ID.
 
@@ -403,7 +563,7 @@ curl -X PATCH https://api.cuub.tech/battery/{sticker_id} \
 }
 ```
 
-### 16. Fetch all scan records
+### 21. Fetch all scan records
 
 ```bash
 curl -X GET https://api.cuub.tech/scans
@@ -433,7 +593,7 @@ curl -X GET https://api.cuub.tech/scans
 
 ## Pop (Battery Release)
 
-### 17. Pop battery from a specific slot (1–6)
+### 22. Pop battery from a specific slot (1–6)
 
 ```bash
 curl -X POST https://api.cuub.tech/pop/{station_id}/{slot}
@@ -460,7 +620,7 @@ curl -X POST https://api.cuub.tech/pop/STATION001/3
 }
 ```
 
-### 18. Pop all batteries from all slots (1–6)
+### 23. Pop all batteries from all slots (1–6)
 
 ```bash
 curl -X POST https://api.cuub.tech/pop/{station_id}/all
@@ -489,7 +649,7 @@ curl -X POST https://api.cuub.tech/pop/{station_id}/all
 
 ## Rents
 
-### 19. Fetch rent data for a station within a date range
+### 24. Fetch rent data for a station within a date range
 
 Date range format: `YYYY-MM-DD_YYYY-MM-DD` (e.g., `2026-01-01_2026-01-31`)
 
@@ -521,7 +681,7 @@ curl -X GET https://api.cuub.tech/rents/STATION001/2026-01-01_2026-01-31
 
 ## Token
 
-### 20. Retrieve Energo API token
+### 25. Retrieve Energo API token
 
 Performs login to Energo backend (with captcha solving via OpenAI), saves the token to the database, and returns it.
 
@@ -547,7 +707,7 @@ curl -X GET https://api.cuub.tech/token
 
 ## Stripe
 
-### 21. List charges
+### 26. List charges
 
 Returns all Stripe charges in a date range (`stripe.charges.list`, paginated until done). Requires `STRIPE_SECRET_KEY` and **from** and **to** query params.
 
@@ -572,7 +732,7 @@ curl "https://api.cuub.tech/stripe/charges?from=2025-02-01&to=2025-02-08"
 }
 ```
 
-### 22. List balance transactions
+### 27. List balance transactions
 
 Returns all Stripe balance transactions in a date range (`stripe.balanceTransactions.list`, paginated until done). Requires `STRIPE_SECRET_KEY` and **from** and **to** query params.
 
@@ -597,7 +757,7 @@ curl "https://api.cuub.tech/stripe/balance-transactions?from=2025-02-01&to=2025-
 }
 ```
 
-### 23. Rents by date range
+### 28. Rents by date range
 
 Returns per-day rent count and net sum from Stripe **balance transactions** for the given date range. Path uses `YYYY-MM-DD_YYYY-MM-DD` (e.g. `2025-02-01_2025-02-08`). Filtered by `REVENUE_TYPES`. Includes previous-month comparison (`ppositive`, `pnegative`, `prents`, `pmoney`). All dates America/Chicago.
 
@@ -630,7 +790,7 @@ curl -X GET https://api.cuub.tech/rents/2025-02-01_2025-02-08
 }
 ```
 
-### 24. Rents by date range (all stations)
+### 29. Rents by date range (all stations)
 
 Returns net revenue per station for the given date range. Fetches charges in range, groups by `charge.customer` (Stripe ID), maps to `stations` for id/title; **money** = positive − negative. Only stations with at least one charge in the period and existing in DB.
 
@@ -659,7 +819,7 @@ curl -X GET https://api.cuub.tech/rents/2025-02-01_2025-02-08/all
 }
 ```
 
-### 25. Rents recent (limit only)
+### 30. Rents recent (limit only)
 
 Aggregated rents for the most recent N balance transactions, with no date filter. Days in `data` are those that appear in the last N transactions.
 

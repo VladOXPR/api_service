@@ -92,6 +92,23 @@ try {
   });
 }
 
+// Load maintenance (tickets) routes with error handling
+let maintenanceRoutes;
+try {
+  maintenanceRoutes = require('./maintenance_service_api');
+  console.log('✅ Maintenance service API routes loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading maintenance service API routes:', error);
+  console.error('Error stack:', error.stack);
+  maintenanceRoutes = express.Router();
+  maintenanceRoutes.get('*', (req, res) => {
+    res.status(500).json({
+      success: false,
+      error: 'Maintenance service API not available: ' + error.message
+    });
+  });
+}
+
 // Load Stripe routes with error handling
 let stripeRoutes;
 try {
@@ -145,6 +162,10 @@ console.log('🔗 Token routes mounted at root path');
 // Mount scan routes
 app.use('/', scanRoutes);
 console.log('🔗 Scan routes mounted at root path');
+
+// Mount maintenance (tickets) routes
+app.use('/', maintenanceRoutes);
+console.log('🔗 Maintenance routes mounted at root path');
 
 // Debug: Log all registered routes (development only)
 if (process.env.NODE_ENV !== 'production') {
@@ -262,32 +283,5 @@ setTimeout(() => {
     scheduleNextTokenRefresh();
     });
 }, 60000); // Wait 1 minute after server starts
-
-// ========================================
-// TELEGRAM BOT SCHEDULERS
-// ========================================
-
-// Load telegram bot module
-let telegramBot;
-try {
-  telegramBot = require('./telegram_bot');
-  console.log('✅ Telegram bot module loaded successfully');
-} catch (error) {
-  console.error('❌ Error loading telegram bot module:', error);
-  console.error('Telegram features will not be available');
-}
-
-// Start the daily Telegram report scheduler
-// Wait a bit after server starts before initializing
-if (telegramBot) {
-  setTimeout(() => {
-    telegramBot.scheduleDailyTelegramReport();
-  }, 30000); // Wait 30 seconds after server starts
-
-  // Start Telegram command polling
-  setTimeout(() => {
-    telegramBot.startTelegramCommandPolling();
-  }, 35000); // Wait 35 seconds after server starts (after daily scheduler)
-}
 
 module.exports = app;
