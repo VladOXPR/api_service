@@ -311,12 +311,28 @@ curl -X DELETE https://api.cuub.tech/stations/{id}
 
 ## Tickets (maintenance)
 
-Maintenance tickets stored in Postgres (`tickets` table). `station_id` must exist in `stations`. `task` is one of the enum values listed under **Create a new ticket**.
+Maintenance tickets stored in Postgres (`tickets` table). `station_id` must exist in `stations`.
+
+The `task` column is `ticket_task[]` (array of enums). In JSON it is always a **string array** (e.g. `["Low Batteries", "Hardware Malfunction"]`). Create and update bodies should send `task` as an array. A **single string** is still accepted for legacy clients and is treated as a one-element array.
+
+**Task labels** (use for multi-select UIs): `High Batteries`, `Low Batteries`, `No Batteries`, `Add Stack`, `Broken Battery`, `High Failure Rates`, `Hardware Malfunction`, `Unusually Offline`, `Urgent Other`, `Other`.
+
+**UI hint (dashboards / maps):** treat **`Urgent Other`** as highest-priority styling (e.g. red) and **`Other`** as lower-priority (e.g. yellow); render every selected task in lists and detail views.
+
+**List filtering:** `GET /tickets?task=...` uses **overlap** with the ticket’s array—rows are included if the ticket’s `task` array **contains any** of the filter values (not an exact array match). Repeat the query parameter or use multiple values as your HTTP client allows, e.g. `?task=Low Batteries&task=Other`.
 
 ### 13. Fetch a list of all tickets
 
 ```bash
 curl -X GET https://api.cuub.tech/tickets
+```
+
+**Optional query**
+
+- `task` (optional, repeatable): filter to tickets whose `task` array contains **any** of these enum values (PostgreSQL `task && ARRAY[...]::ticket_task[]`).
+
+```bash
+curl -G "https://api.cuub.tech/tickets" --data-urlencode "task=Low Batteries" --data-urlencode "task=Other"
 ```
 
 **Expected response**
@@ -332,7 +348,7 @@ curl -X GET https://api.cuub.tech/tickets
       "latitude": 41.88,
       "longitude": -87.63,
       "created_at": "2026-03-28T12:00:00.000Z",
-      "task": "Low Batteries",
+      "task": ["Low Batteries", "Hardware Malfunction"],
       "description": "Optional notes"
     }
   ],
@@ -360,7 +376,7 @@ curl -X GET https://api.cuub.tech/tickets/{id}
     "latitude": 41.88,
     "longitude": -87.63,
     "created_at": "2026-03-28T12:00:00.000Z",
-    "task": "Low Batteries",
+    "task": ["Low Batteries", "Hardware Malfunction"],
     "description": "Optional notes"
   }
 }
@@ -376,7 +392,7 @@ curl -X POST https://api.cuub.tech/tickets \
     "station_id": "{station_id}",
     "latitude": 41.88,
     "longitude": -87.63,
-    "task": "Low Batteries",
+    "task": ["Low Batteries", "Hardware Malfunction"],
     "description": "Optional notes"
   }'
 ```
@@ -387,7 +403,7 @@ curl -X POST https://api.cuub.tech/tickets \
 - `station_id` (required): must match an existing `stations.id`
 - `latitude` (required): number between -90 and 90
 - `longitude` (required): number between -180 and 180
-- `task` (required): one of `High Batteries`, `Low Batteries`, `No Batteries`, `Add Stack`, `Broken Battery`, `High Failure Rates`, `Hardware Malfunction`, `Unusually Offline`, `Other`
+- `task` (required): non-empty **array** of labels from the task list above (duplicates are deduplicated). Legacy: a single string is accepted as one task.
 - `description` (optional)
 
 **Expected response**
@@ -402,7 +418,7 @@ curl -X POST https://api.cuub.tech/tickets \
     "latitude": 41.88,
     "longitude": -87.63,
     "created_at": "2026-03-28T12:00:00.000Z",
-    "task": "Low Batteries",
+    "task": ["Low Batteries", "Hardware Malfunction"],
     "description": "Optional notes"
   },
   "message": "Ticket created successfully"
@@ -411,14 +427,14 @@ curl -X POST https://api.cuub.tech/tickets \
 
 ### 16. Update a ticket
 
-Send at least one field. If updating coordinates, send both `latitude` and `longitude` together.
+Send at least one field. If updating coordinates, send both `latitude` and `longitude` together. If updating `task`, send a non-empty array (replaces the whole list).
 
 ```bash
 curl -X PATCH https://api.cuub.tech/tickets/{id} \
   -H "Content-Type: application/json" \
   -d '{
     "location_name": "Updated location name",
-    "task": "Hardware Malfunction",
+    "task": ["Hardware Malfunction", "Urgent Other"],
     "description": "Updated notes"
   }'
 ```
@@ -435,7 +451,7 @@ curl -X PATCH https://api.cuub.tech/tickets/{id} \
     "latitude": 41.88,
     "longitude": -87.63,
     "created_at": "2026-03-28T12:00:00.000Z",
-    "task": "Hardware Malfunction",
+    "task": ["Hardware Malfunction", "Urgent Other"],
     "description": "Updated notes"
   },
   "message": "Ticket updated successfully"
@@ -461,7 +477,7 @@ curl -X DELETE https://api.cuub.tech/tickets/{id}
     "latitude": 41.88,
     "longitude": -87.63,
     "created_at": "2026-03-28T12:00:00.000Z",
-    "task": "Low Batteries",
+    "task": ["Low Batteries", "Hardware Malfunction"],
     "description": "Optional notes"
   }
 }

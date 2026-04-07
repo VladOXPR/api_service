@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const router = express.Router();
 router.use(express.json());
 
+/** Allowed labels for `ticket_task` enum (Postgres). Order matches product semantics: Urgent Other → red, Other → yellow in UIs. */
 const TICKET_TASKS = [
   'High Batteries',
   'Low Batteries',
@@ -13,6 +14,7 @@ const TICKET_TASKS = [
   'High Failure Rates',
   'Hardware Malfunction',
   'Unusually Offline',
+  'Urgent Other',
   'Other'
 ];
 
@@ -74,6 +76,89 @@ function isValidLatLng(lat, lng) {
   return { ok: true, lat: latNum, lng: lngNum };
 }
 
+/**
+ * Normalize DB value (ticket_task[]) to string[] for JSON.
+ */
+function normalizeTaskFromDb(val) {
+  if (val == null) {
+    return [];
+  }
+  if (Array.isArray(val)) {
+    return val.map((x) => (x == null ? '' : String(x))).filter(Boolean);
+  }
+  if (typeof val === 'string') {
+    return [val];
+  }
+  return [];
+}
+
+/**
+ * Parse `task` from request body: non-empty array of enum labels, or legacy single string.
+ * @returns {{ tasks: string[] } | { error: string }}
+ */
+function parseTaskInput(task, { allowEmpty = false } = {}) {
+  if (task === undefined) {
+    return { tasks: undefined };
+  }
+  if (task === null) {
+    return { error: 'task cannot be null' };
+  }
+
+  let arr;
+  if (Array.isArray(task)) {
+    arr = task.map((t) => String(t).trim()).filter((t) => t.length > 0);
+  } else if (typeof task === 'string' && task.trim() !== '') {
+    arr = [task.trim()];
+  } else {
+    return {
+      error:
+        'task must be a non-empty array of task labels (e.g. ["Low Batteries","Hardware Malfunction"]); a single string is accepted for legacy clients'
+    };
+  }
+
+  if (!allowEmpty && arr.length === 0) {
+    return { error: 'task must include at least one value' };
+  }
+  if (allowEmpty && arr.length === 0) {
+    return { tasks: [] };
+  }
+
+  const invalid = arr.filter((t) => !TICKET_TASKS.includes(t));
+  if (invalid.length > 0) {
+    return {
+      error: `Invalid task value(s): ${invalid.join(', ')}. Allowed: ${TICKET_TASKS.join(', ')}`
+    };
+  }
+
+  return { tasks: [...new Set(arr)] };
+}
+
+/**
+ * Query param `task`: string or string[]. Filter tickets whose `task` array overlaps (contains any of the given values).
+ * @returns {{ tasks: string[] } | { error: string } | null} null = no filter
+ */
+function parseTaskQueryFilter(taskQuery) {
+  if (taskQuery === undefined || taskQuery === null || taskQuery === '') {
+    return null;
+  }
+  const rawList = Array.isArray(taskQuery) ? taskQuery : [taskQuery];
+  const validated = [];
+  for (const t of rawList) {
+    const s = String(t).trim();
+    if (!s) {
+      continue;
+    }
+    if (!TICKET_TASKS.includes(s)) {
+      return { error: `Invalid task filter: ${s}` };
+    }
+    validated.push(s);
+  }
+  if (validated.length === 0) {
+    return null;
+  }
+  return { tasks: [...new Set(validated)] };
+}
+
 function rowToTicket(row) {
   if (!row) return null;
   return {
@@ -83,24 +168,38 @@ function rowToTicket(row) {
     latitude: row.latitude != null ? parseFloat(row.latitude) : null,
     longitude: row.longitude != null ? parseFloat(row.longitude) : null,
     created_at: row.created_at,
-    task: row.task,
+    task: normalizeTaskFromDb(row.task),
     description: row.description
   };
 }
 
 /**
  * GET /tickets
- * List all tickets (newest first)
+ * Optional query: task (repeatable or array) — tickets where the ticket's task array contains any of the given values (overlap, not exact row match).
  */
 router.get('/tickets', async (req, res) => {
+  const filterParsed = parseTaskQueryFilter(req.query.task);
+  if (filterParsed && filterParsed.error) {
+    return res.status(400).json({ success: false, error: filterParsed.error });
+  }
+
   let client;
   try {
     client = await pool.connect();
-    const result = await client.query(
-      `SELECT id, location_name, station_id, latitude, longitude, created_at, task::text AS task, description
-       FROM tickets
-       ORDER BY created_at DESC`
-    );
+
+    let sql = `
+      SELECT id, location_name, station_id, latitude, longitude, created_at, task, description
+      FROM tickets`;
+    const params = [];
+
+    if (filterParsed && filterParsed.tasks.length > 0) {
+      params.push(filterParsed.tasks);
+      sql += ` WHERE task && $1::ticket_task[]`;
+    }
+
+    sql += ` ORDER BY created_at DESC`;
+
+    const result = await client.query(sql, params);
     const data = result.rows.map(rowToTicket);
     res.json({
       success: true,
@@ -120,7 +219,6 @@ router.get('/tickets', async (req, res) => {
 
 /**
  * GET /tickets/:id
- * Fetch a single ticket by id
  */
 router.get('/tickets/:id', async (req, res) => {
   const id = parseTicketId(req.params.id);
@@ -135,7 +233,7 @@ router.get('/tickets/:id', async (req, res) => {
   try {
     client = await pool.connect();
     const result = await client.query(
-      `SELECT id, location_name, station_id, latitude, longitude, created_at, task::text AS task, description
+      `SELECT id, location_name, station_id, latitude, longitude, created_at, task, description
        FROM tickets
        WHERE id = $1`,
       [id]
@@ -165,7 +263,7 @@ router.get('/tickets/:id', async (req, res) => {
 
 /**
  * POST /tickets
- * Create a new ticket
+ * Body: task = string[] (or legacy single string)
  */
 router.post('/tickets', async (req, res) => {
   const { location_name, station_id, latitude, longitude, task, description } = req.body || {};
@@ -179,14 +277,10 @@ router.post('/tickets', async (req, res) => {
   if (latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
     return res.status(400).json({ success: false, error: 'latitude and longitude are required' });
   }
-  if (!task || String(task).trim() === '') {
-    return res.status(400).json({ success: false, error: 'task is required' });
-  }
-  if (!TICKET_TASKS.includes(task)) {
-    return res.status(400).json({
-      success: false,
-      error: `task must be one of: ${TICKET_TASKS.join(', ')}`
-    });
+
+  const parsed = parseTaskInput(task, { allowEmpty: false });
+  if (parsed.error) {
+    return res.status(400).json({ success: false, error: parsed.error });
   }
 
   const coords = isValidLatLng(latitude, longitude);
@@ -199,14 +293,14 @@ router.post('/tickets', async (req, res) => {
     client = await pool.connect();
     const result = await client.query(
       `INSERT INTO tickets (location_name, station_id, latitude, longitude, task, description)
-       VALUES ($1, $2, $3, $4, $5::ticket_task, $6)
-       RETURNING id, location_name, station_id, latitude, longitude, created_at, task::text AS task, description`,
+       VALUES ($1, $2, $3, $4, $5::ticket_task[], $6)
+       RETURNING id, location_name, station_id, latitude, longitude, created_at, task, description`,
       [
         String(location_name).trim(),
         String(station_id).trim(),
         coords.lat,
         coords.lng,
-        task,
+        parsed.tasks,
         description === undefined || description === null ? null : String(description)
       ]
     );
@@ -227,7 +321,7 @@ router.post('/tickets', async (req, res) => {
     if (error.code === '22P02') {
       return res.status(400).json({
         success: false,
-        error: 'Invalid task or data for ticket_task enum'
+        error: 'Invalid task or data for ticket_task[]'
       });
     }
     res.status(500).json({
@@ -253,7 +347,7 @@ router.delete('/tickets/:id', async (req, res) => {
     client = await pool.connect();
     const result = await client.query(
       `DELETE FROM tickets WHERE id = $1
-       RETURNING id, location_name, station_id, latitude, longitude, created_at, task::text AS task, description`,
+       RETURNING id, location_name, station_id, latitude, longitude, created_at, task, description`,
       [id]
     );
 
@@ -302,13 +396,14 @@ router.patch('/tickets/:id', async (req, res) => {
     });
   }
 
-  if (task === null) {
-    return res.status(400).json({ success: false, error: 'task cannot be null' });
+  const parsed = parseTaskInput(task, { allowEmpty: true });
+  if (parsed.error) {
+    return res.status(400).json({ success: false, error: parsed.error });
   }
-  if (task !== undefined && !TICKET_TASKS.includes(task)) {
+  if (task !== undefined && parsed.tasks !== undefined && parsed.tasks.length === 0) {
     return res.status(400).json({
       success: false,
-      error: `task must be one of: ${TICKET_TASKS.join(', ')}`
+      error: 'task cannot be an empty array; omit the field or send at least one task label'
     });
   }
 
@@ -354,8 +449,8 @@ router.patch('/tickets/:id', async (req, res) => {
       values.push(coords.lng);
     }
     if (task !== undefined) {
-      updates.push(`task = $${paramIndex++}::ticket_task`);
-      values.push(task);
+      updates.push(`task = $${paramIndex++}::ticket_task[]`);
+      values.push(parsed.tasks);
     }
     if (description !== undefined) {
       updates.push(`description = $${paramIndex++}`);
@@ -367,7 +462,7 @@ router.patch('/tickets/:id', async (req, res) => {
       UPDATE tickets
       SET ${updates.join(', ')}
       WHERE id = $${paramIndex}
-      RETURNING id, location_name, station_id, latitude, longitude, created_at, task::text AS task, description
+      RETURNING id, location_name, station_id, latitude, longitude, created_at, task, description
     `;
 
     const result = await client.query(query, values);
@@ -398,6 +493,7 @@ router.patch('/tickets/:id', async (req, res) => {
   }
 });
 
-console.log('📦 Maintenance service API router initialized: GET/POST/PATCH/DELETE /tickets');
+console.log('📦 Maintenance service API router initialized: GET/POST/PATCH/DELETE /tickets (task as ticket_task[])');
 
 module.exports = router;
+module.exports.TICKET_TASKS = TICKET_TASKS;
