@@ -194,7 +194,7 @@ router.get('/tickets', async (req, res) => {
 
     if (filterParsed && filterParsed.tasks.length > 0) {
       params.push(filterParsed.tasks);
-      sql += ` WHERE task && $1::ticket_task[]`;
+      sql += ` WHERE task && $1::text[]::ticket_task[]`;
     }
 
     sql += ` ORDER BY created_at DESC`;
@@ -293,7 +293,7 @@ router.post('/tickets', async (req, res) => {
     client = await pool.connect();
     const result = await client.query(
       `INSERT INTO tickets (location_name, station_id, latitude, longitude, task, description)
-       VALUES ($1, $2, $3, $4, $5::ticket_task[], $6)
+       VALUES ($1, $2, $3, $4, $5::text[]::ticket_task[], $6)
        RETURNING id, location_name, station_id, latitude, longitude, created_at, task, description`,
       [
         String(location_name).trim(),
@@ -449,7 +449,7 @@ router.patch('/tickets/:id', async (req, res) => {
       values.push(coords.lng);
     }
     if (task !== undefined) {
-      updates.push(`task = $${paramIndex++}::ticket_task[]`);
+      updates.push(`task = $${paramIndex++}::text[]::ticket_task[]`);
       values.push(parsed.tasks);
     }
     if (description !== undefined) {
