@@ -80,6 +80,22 @@ async function getTokenFromDatabase() {
 }
 
 /**
+ * Ensure weekday_hours is a plain object for JSON (pg usually parses jsonb; handle string edge cases).
+ */
+function normalizeStationRow(row) {
+  if (!row) return row;
+  let { weekday_hours: wh } = row;
+  if (wh != null && typeof wh === 'string') {
+    try {
+      wh = JSON.parse(wh);
+    } catch {
+      wh = null;
+    }
+  }
+  return { ...row, weekday_hours: wh };
+}
+
+/**
  * Helper function to fetch battery availability from Relink API
  * @param {string} stationId - The station ID
  * @param {string} token - The authorization token
@@ -141,12 +157,13 @@ router.get('/stations', async (req, res) => {
     
     client = await pool.connect();
     const result = await client.query(
-      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id FROM stations ORDER BY updated_at DESC'
+      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id, stripe_id, weekday_hours FROM stations ORDER BY updated_at DESC'
     );
     
     // Enrich each station with battery availability data
     const stationsWithBatteryInfo = await Promise.all(
-      result.rows.map(async (station) => {
+      result.rows.map(async (raw) => {
+        const station = normalizeStationRow(raw);
         if (token) {
           const batteryInfo = await getBatteryAvailability(station.id, token);
           return {
@@ -223,7 +240,7 @@ router.get('/stations/:id', async (req, res) => {
     
     client = await pool.connect();
     const result = await client.query(
-      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id FROM stations WHERE id = $1',
+      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id, stripe_id, weekday_hours FROM stations WHERE id = $1',
       [id]
     );
     
@@ -235,7 +252,7 @@ router.get('/stations/:id', async (req, res) => {
     }
     
     // Enrich station with battery availability data
-    let station = result.rows[0];
+    let station = normalizeStationRow(result.rows[0]);
     if (token) {
       const batteryInfo = await getBatteryAvailability(id, token);
       station = {
@@ -289,8 +306,8 @@ function arrayToCSV(data, headers) {
       if (value === null || value === undefined) {
         return '';
       }
-      // Escape commas and quotes in string values
-      const stringValue = String(value);
+      const stringValue =
+        typeof value === 'object' ? JSON.stringify(value) : String(value);
       if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
         return `"${stringValue.replace(/"/g, '""')}"`;
       }
@@ -318,12 +335,13 @@ router.get('/stations/export', async (req, res) => {
     
     client = await pool.connect();
     const result = await client.query(
-      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id FROM stations ORDER BY updated_at DESC'
+      'SELECT id, title, latitude, longitude, updated_at, address, screen_id, sim_id, stripe_id, weekday_hours FROM stations ORDER BY updated_at DESC'
     );
     
     // Enrich each station with battery availability data
     const stationsWithBatteryInfo = await Promise.all(
-      result.rows.map(async (station) => {
+      result.rows.map(async (raw) => {
+        const station = normalizeStationRow(raw);
         if (token) {
           const batteryInfo = await getBatteryAvailability(station.id, token);
           return {
@@ -360,6 +378,8 @@ router.get('/stations/export', async (req, res) => {
       'address',
       'screen_id',
       'sim_id',
+      'stripe_id',
+      'weekday_hours',
       'filled_slots',
       'open_slots',
       'online'

@@ -185,13 +185,24 @@ curl -X GET https://api.cuub.tech/stations
       "address": null,
       "screen_id": null,
       "sim_id": null,
+      "stripe_id": "cus_xxxxxxxxxxxx",
+      "weekday_hours": {
+        "mon": { "open": "09:00", "close": "17:00" },
+        "tue": { "open": "09:00", "close": "17:00" },
+        "wed": { "open": "09:00", "close": "17:00" },
+        "thu": { "open": "09:00", "close": "17:00" },
+        "fri": { "open": "09:00", "close": "17:00" }
+      },
       "filled_slots": 4,
-      "open_slots": 2
+      "open_slots": 2,
+      "online": true
     }
   ],
   "count": 1
 }
 ```
+
+`stripe_id` may be `null` if the station has no Stripe customer. `weekday_hours` is the parsed `jsonb` object (or `null` if unset).
 
 ### 8. Fetch a single station by ID
 
@@ -213,8 +224,17 @@ curl -X GET https://api.cuub.tech/stations/{id}
     "address": null,
     "screen_id": null,
     "sim_id": null,
+    "stripe_id": "cus_xxxxxxxxxxxx",
+    "weekday_hours": {
+      "mon": { "open": "09:00", "close": "17:00" },
+      "tue": { "open": "09:00", "close": "17:00" },
+      "wed": { "open": "09:00", "close": "17:00" },
+      "thu": { "open": "09:00", "close": "17:00" },
+      "fri": { "open": "09:00", "close": "17:00" }
+    },
     "filled_slots": 4,
-    "open_slots": 2
+    "open_slots": 2,
+    "online": true
   }
 }
 ```
@@ -227,7 +247,7 @@ curl -X GET https://api.cuub.tech/stations/export -o stations.csv
 
 **Expected response**
 
-Returns a CSV file download with columns: `id`, `title`, `latitude`, `longitude`, `updated_at`, `address`, `screen_id`, `sim_id`, `filled_slots`, `open_slots`.
+Returns a CSV file download with columns: `id`, `title`, `latitude`, `longitude`, `updated_at`, `address`, `screen_id`, `sim_id`, `stripe_id`, `weekday_hours` (JSON string in the cell), `filled_slots`, `open_slots`, `online`.
 
 ### 10. Create a new station
 
