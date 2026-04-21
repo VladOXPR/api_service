@@ -15,7 +15,6 @@ try {
 let cachedChromiumPath = null;
 
 const path = require('path');
-const { execSync } = require('child_process');
 
 // Load environment variables for local development
 // This ensures OPENAI_API_KEY, ENERGO_USERNAME, and ENERGO_PASSWORD are available when running locally
@@ -622,22 +621,6 @@ async function closeBrowser(result) {
 }
 
 /**
- * Run optional termination script when token_extract finishes (direct run only).
- * Set TERMINATION_SCRIPT in env to the path of a script (e.g. ./scripts/terminate.sh).
- */
-function runTerminationScript() {
-    const script = process.env.TERMINATION_SCRIPT;
-    if (!script || typeof script !== 'string' || !script.trim()) return;
-    try {
-        console.log('Running termination script:', script);
-        execSync(script.trim(), { stdio: 'inherit', cwd: __dirname });
-        console.log('Termination script finished.');
-    } catch (err) {
-        console.error('Termination script failed:', err.message || err);
-    }
-}
-
-/**
  * Example usage function
  * Run this directly to test the login
  */
@@ -684,7 +667,9 @@ async function testLogin() {
             console.log('\n⚠️  Authorization token not captured. The cabinet API request may not have been made yet.');
         }
 
-        await closeBrowser(result);
+        // Keep browser open for inspection (comment out if you want it to close automatically)
+        // await closeBrowser(result);
+
         return result;
     } catch (error) {
         console.error('Test login failed:', error);
@@ -858,16 +843,7 @@ module.exports = {
     router
 };
 
-// If running directly, execute test then run termination script
+// If running directly, execute test
 if (require.main === module) {
-    (async () => {
-        try {
-            await testLogin();
-        } catch (err) {
-            console.error(err);
-            process.exitCode = 1;
-        } finally {
-            runTerminationScript();
-        }
-    })();
+    testLogin().catch(console.error);
 }
