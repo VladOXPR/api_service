@@ -235,7 +235,7 @@ function calculateDuration(startTime, returnTime) {
 
 /**
  * Calculate amount paid based on duration
- * Pricing: $3 per 24 hours, max $21 for 7 days (168 hours), $24 penalty after 7 days
+ * Pricing: $4 per 24 hours, capped at $28 for 7 days (168 hours); no further charges after 7 days
  * @param {number|null} startTime - Start time in epoch milliseconds
  * @param {number|null} returnTime - Return time in epoch milliseconds (null if not returned)
  * @returns {number} - Amount paid in dollars
@@ -255,19 +255,17 @@ function calculateAmountPaid(startTime, returnTime) {
 
   // 7 days = 168 hours
   const maxBorrowHours = 168;
-  const maxBorrowAmount = 21; // $21 for 7 days
-  const penaltyAmount = 24; // $24 after 7 days (includes $3 penalty)
+  const maxBorrowAmount = 28; // $28 for 7 days
 
-  if (durationHours > maxBorrowHours) {
-    // After 7 days, apply penalty
-    return penaltyAmount;
-  } else {
-    // $3 per 24 hours, rounded up
-    // Example: 1 hour = $3, 24 hours = $3, 25 hours = $6, etc.
-    const amount = Math.ceil(durationHours / 24) * 3;
-    // Cap at $21 (max borrow amount)
-    return Math.min(amount, maxBorrowAmount);
+  if (durationHours >= maxBorrowHours) {
+    // After 7 days, charges stop at the cap
+    return maxBorrowAmount;
   }
+
+  // $4 per 24 hours, rounded up
+  // Example: 1 hour = $4, 24 hours = $4, 25 hours = $8, etc.
+  const amount = Math.ceil(durationHours / 24) * 4;
+  return Math.min(amount, maxBorrowAmount);
 }
 
 /**
