@@ -434,8 +434,17 @@ router.get('/stations/export', async (req, res) => {
 router.post('/stations', async (req, res) => {
   let client;
   try {
-    const { id, title, latitude, longitude } = req.body;
-    
+    const { id, title, latitude, longitude, address, stripe_id } = req.body;
+
+    const addressParam =
+      address !== undefined && address !== null
+        ? (String(address).trim() === '' ? null : String(address).trim())
+        : null;
+    const stripeIdParam =
+      stripe_id !== undefined && stripe_id !== null
+        ? (String(stripe_id).trim() === '' ? null : String(stripe_id).trim())
+        : null;
+
     // Validate required fields
     if (!id || id.trim() === '') {
       return res.status(400).json({
@@ -484,18 +493,18 @@ router.post('/stations', async (req, res) => {
     }
     
     client = await pool.connect();
-    
-    // Insert new station
+
+    // Insert new station (address / stripe_id from body so DB defaults like "X" are not used)
     const result = await client.query(
-      `INSERT INTO stations (id, title, latitude, longitude, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       RETURNING id, title, latitude, longitude, updated_at`,
-      [id, title, latNum, lngNum]
+      `INSERT INTO stations (id, title, latitude, longitude, address, stripe_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING id, title, latitude, longitude, updated_at, address, screen_id, sim_id, stripe_id, weekday_hours`,
+      [id, title, latNum, lngNum, addressParam, stripeIdParam]
     );
-    
+
     res.status(201).json({
       success: true,
-      data: result.rows[0],
+      data: normalizeStationRow(result.rows[0]),
       message: 'Station created successfully'
     });
   } catch (error) {
@@ -576,8 +585,8 @@ router.patch('/stations/:id', async (req, res) => {
   let client;
   try {
     const { id } = req.params;
-    const { title, latitude, longitude } = req.body;
-    
+    const { title, latitude, longitude, address, stripe_id } = req.body;
+
     // Validate id is provided and not empty
     if (!id || id.trim() === '') {
       return res.status(400).json({
@@ -585,12 +594,19 @@ router.patch('/stations/:id', async (req, res) => {
         error: 'Station ID is required'
       });
     }
-    
+
     // Check if at least one field is being updated
-    if (title === undefined && latitude === undefined && longitude === undefined) {
+    if (
+      title === undefined &&
+      latitude === undefined &&
+      longitude === undefined &&
+      address === undefined &&
+      stripe_id === undefined
+    ) {
       return res.status(400).json({
         success: false,
-        error: 'At least one field (title, latitude, longitude) must be provided'
+        error:
+          'At least one field (title, latitude, longitude, address, stripe_id) must be provided'
       });
     }
     
@@ -615,7 +631,16 @@ router.patch('/stations/:id', async (req, res) => {
         });
       }
     }
-    
+
+    if (latitude !== undefined || longitude !== undefined) {
+      if (latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
+        return res.status(400).json({
+          success: false,
+          error: 'latitude and longitude must be updated together'
+        });
+      }
+    }
+
     client = await pool.connect();
     
     // Build dynamic UPDATE query
@@ -641,27 +666,47 @@ router.patch('/stations/:id', async (req, res) => {
       updates.push(`longitude = $${paramIndex++}`);
       values.push(parseFloat(longitude));
     }
-    
+    if (address !== undefined) {
+      const addr =
+        address === null
+          ? null
+          : String(address).trim() === ''
+            ? null
+            : String(address).trim();
+      updates.push(`address = $${paramIndex++}`);
+      values.push(addr);
+    }
+    if (stripe_id !== undefined) {
+      const sid =
+        stripe_id === null
+          ? null
+          : String(stripe_id).trim() === ''
+            ? null
+            : String(stripe_id).trim();
+      updates.push(`stripe_id = $${paramIndex++}`);
+      values.push(sid);
+    }
+
     // Always update updated_at
     updates.push(`updated_at = NOW()`);
-    
+
     // Add id as the last parameter
     values.push(id);
-    
-    const query = `UPDATE stations SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING id, title, latitude, longitude, updated_at`;
-    
+
+    const query = `UPDATE stations SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING id, title, latitude, longitude, updated_at, address, screen_id, sim_id, stripe_id, weekday_hours`;
+
     const result = await client.query(query, values);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
         error: 'Station not found'
       });
     }
-    
+
     res.json({
       success: true,
-      data: result.rows[0],
+      data: normalizeStationRow(result.rows[0]),
       message: 'Station updated successfully'
     });
   } catch (error) {

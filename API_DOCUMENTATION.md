@@ -258,9 +258,17 @@ curl -X POST https://api.cuub.tech/stations \
     "id": "STATION001",
     "title": "Main Street Station",
     "latitude": 40.7128,
-    "longitude": -74.006
+    "longitude": -74.006,
+    "address": "99 Test St",
+    "stripe_id": "cus_xxxxxxxxxxxx"
   }'
 ```
+
+**Body fields**
+
+- `id`, `title`, `latitude`, `longitude` (required) — same validation as before
+- `address` (optional): stored on the row; omit or `null` for SQL `NULL`
+- `stripe_id` (optional): stored on the row; omit or `null` for SQL `NULL`
 
 **Expected response**
 
@@ -272,7 +280,12 @@ curl -X POST https://api.cuub.tech/stations \
     "title": "Main Street Station",
     "latitude": 40.7128,
     "longitude": -74.006,
-    "updated_at": "2026-02-06T19:41:35.755Z"
+    "updated_at": "2026-02-06T19:41:35.755Z",
+    "address": "99 Test St",
+    "screen_id": null,
+    "sim_id": null,
+    "stripe_id": "cus_xxxxxxxxxxxx",
+    "weekday_hours": null
   },
   "message": "Station created successfully"
 }
@@ -280,13 +293,24 @@ curl -X POST https://api.cuub.tech/stations \
 
 ### 11. Update a station
 
+Send at least one of: `title`, `latitude`+`longitude` (both required together), `address`, `stripe_id`. To change coordinates, include both `latitude` and `longitude`.
+
+```bash
+curl -X PATCH https://api.cuub.tech/stations/{id} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stripe_id": "cus_newidhere"
+  }'
+```
+
 ```bash
 curl -X PATCH https://api.cuub.tech/stations/{id} \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Updated Station Name",
     "latitude": 40.75,
-    "longitude": -74.01
+    "longitude": -74.01,
+    "address": "100 Updated Ave"
   }'
 ```
 
@@ -300,7 +324,12 @@ curl -X PATCH https://api.cuub.tech/stations/{id} \
     "title": "Updated Station Name",
     "latitude": 40.75,
     "longitude": -74.01,
-    "updated_at": "2026-02-06T19:41:35.755Z"
+    "updated_at": "2026-02-06T19:41:35.755Z",
+    "address": "100 Updated Ave",
+    "screen_id": null,
+    "sim_id": null,
+    "stripe_id": "cus_newidhere",
+    "weekday_hours": null
   },
   "message": "Station updated successfully"
 }
