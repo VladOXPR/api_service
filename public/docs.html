@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CUUB API Documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0d12;
+    --bg-elev: #11141b;
+    --bg-elev-2: #161a23;
+    --border: #222734;
+    --border-strong: #2c3243;
+    --text: #e6e8ee;
+    --text-dim: #9aa3b2;
+    --text-muted: #6b7388;
+    --brand: #7c9cff;
+    --brand-2: #a78bfa;
+    --accent: #22d3ee;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --get: #3b82f6;
+    --post: #22c55e;
+    --patch: #f59e0b;
+    --delete: #ef4444;
+    --code-bg: #0d1017;
+    --code-border: #1f2533;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow-lg: 0 10px 30px rgba(0,0,0,0.35);
+    --sidebar-w: 288px;
+    --content-w: 980px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre { font-family: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+
+  /* Top bar */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px;
+    background: rgba(11, 13, 18, 0.85);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    font-weight: 800; letter-spacing: 0.3px;
+  }
+  .brand .logo {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: grid; place-items: center; color: #0b0d12; font-weight: 900;
+    box-shadow: 0 6px 20px rgba(124,156,255,0.25);
+  }
+  .brand .name { font-size: 15px; }
+  .brand .sub { color: var(--text-muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
+  .topbar .actions { display: flex; gap: 8px; align-items: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 999px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    color: var(--text-dim); font-size: 12.5px;
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success); }
+
+  /* Layout */
+  .layout {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    position: sticky; top: 61px;
+    height: calc(100vh - 61px);
+    overflow-y: auto;
+    padding: 18px 16px 40px;
+    border-right: 1px solid var(--border);
+  }
+  .search {
+    position: relative; margin-bottom: 16px;
+  }
+  .search input {
+    width: 100%; padding: 10px 12px 10px 36px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: inherit; font-size: 14px; outline: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .search input:focus { border-color: var(--brand); background: var(--bg-elev-2); }
+  .search svg {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted);
+  }
+  .nav-group { margin-bottom: 18px; }
+  .nav-group h4 {
+    margin: 0 0 6px; padding: 8px 10px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-muted);
+  }
+  .nav-group a {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; margin: 1px 0;
+    border-radius: 7px; color: var(--text-dim);
+    font-size: 13.5px; text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+  }
+  .nav-group a:hover { background: var(--bg-elev); color: var(--text); }
+  .nav-group a.active { background: rgba(124,156,255,0.12); color: var(--text); border-left: 2px solid var(--brand); padding-left: 8px; }
+  .method-tag {
+    display: inline-block; font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; min-width: 40px; text-align: center;
+    flex-shrink: 0;
+  }
+  .method-tag.GET { background: rgba(59,130,246,0.15); color: #7aa7ff; }
+  .method-tag.POST { background: rgba(34,197,94,0.15); color: #56d97a; }
+  .method-tag.PATCH { background: rgba(245,158,11,0.18); color: #ffbb55; }
+  .method-tag.DELETE { background: rgba(239,68,68,0.15); color: #ff7070; }
+
+  /* Content */
+  .content {
+    padding: 40px 48px 80px;
+    max-width: var(--content-w);
+    width: 100%;
+  }
+  .hero {
+    padding: 36px 0 28px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 36px;
+  }
+  .hero h1 {
+    margin: 0 0 10px; font-size: 40px; line-height: 1.15;
+    font-weight: 800; letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #fff 0%, #a78bfa 80%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero p { margin: 0; color: var(--text-dim); font-size: 16px; max-width: 720px; }
+  .base-url {
+    display: inline-flex; align-items: center; gap: 10px;
+    margin-top: 16px; padding: 8px 14px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+  .base-url .label { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .base-url .url { color: var(--accent); }
+
+  .section {
+    margin-bottom: 48px;
+    scroll-margin-top: 80px;
+  }
+  .section > h2 {
+    font-size: 24px; font-weight: 700; margin: 0 0 8px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    letter-spacing: -0.01em;
+  }
+  .section > p.lead { color: var(--text-dim); margin: 8px 0 22px; }
+
+  /* Endpoint card */
+  .endpoint {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+    scroll-margin-top: 80px;
+    transition: border-color 0.15s;
+  }
+  .endpoint:hover { border-color: var(--border-strong); }
+  .endpoint-header { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .endpoint-header .method {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700;
+    padding: 5px 10px; border-radius: 6px;
+    letter-spacing: 0.06em;
+  }
+  .endpoint-header .method.GET { background: rgba(59,130,246,0.18); color: #8fb4ff; }
+  .endpoint-header .method.POST { background: rgba(34,197,94,0.18); color: #6ee391; }
+  .endpoint-header .method.PATCH { background: rgba(245,158,11,0.2); color: #ffc76a; }
+  .endpoint-header .method.DELETE { background: rgba(239,68,68,0.18); color: #ff8585; }
+  .endpoint-header .path {
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+    color: var(--text); word-break: break-all;
+  }
+  .endpoint-header .path .param { color: var(--accent); }
+  .endpoint h3 {
+    margin: 4px 0 10px; font-size: 17px; font-weight: 600; color: var(--text);
+  }
+  .endpoint-desc { color: var(--text-dim); margin: 0 0 18px; }
+
+  .subhead {
+    margin: 22px 0 8px;
+    font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--text-muted);
+  }
+
+  /* Code blocks */
+  .code-wrap {
+    position: relative;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin: 4px 0 8px;
+  }
+  .code-wrap .tabs {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #0a0d14; border-bottom: 1px solid var(--code-border);
+  }
+  .code-wrap .lang {
+    font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.08em; font-weight: 700;
+  }
+  .copy-btn {
+    background: transparent; border: 1px solid var(--border-strong);
+    color: var(--text-dim); font-size: 11.5px; font-family: inherit;
+    padding: 4px 10px; border-radius: 5px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .copy-btn:hover { background: var(--bg-elev-2); color: var(--text); border-color: var(--brand); }
+  .copy-btn.copied { color: var(--success); border-color: var(--success); }
+  pre {
+    margin: 0; padding: 14px 16px; overflow-x: auto;
+    font-size: 12.5px; line-height: 1.6;
+    color: #cfd6e4;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; }
+
+  /* Syntax tokens */
+  .tk-kw { color: #c084fc; }
+  .tk-str { color: #9cd97a; }
+  .tk-num { color: #fbbf24; }
+  .tk-bool { color: #f472b6; }
+  .tk-null { color: #f472b6; }
+  .tk-key { color: #7aa7ff; }
+  .tk-comment { color: #5b6476; font-style: italic; }
+  .tk-flag { color: #a78bfa; }
+  .tk-url { color: #22d3ee; }
+  .tk-punc { color: #9aa3b2; }
+
+  /* Field tables */
+  .fields {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin: 6px 0 8px;
+  }
+  .field-row {
+    display: grid; grid-template-columns: 200px 100px 1fr;
+    gap: 16px; padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .field-row:first-child { border-top: none; }
+  .field-row .fname { font-family: 'JetBrains Mono', monospace; color: var(--text); font-weight: 500; }
+  .field-row .ftype { color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .field-row .ftype .req { color: var(--danger); font-weight: 700; margin-left: 4px; font-size: 11px; }
+  .field-row .ftype .opt { color: var(--text-muted); font-weight: 500; margin-left: 4px; font-size: 11px; }
+  .field-row .fdesc { color: var(--text-dim); }
+  .field-row .fdesc code { background: var(--bg-elev-2); padding: 1px 6px; border-radius: 4px; color: var(--text); font-size: 12px; }
+
+  .note {
+    border-left: 3px solid var(--brand);
+    background: rgba(124,156,255,0.06);
+    padding: 12px 14px; border-radius: 6px;
+    margin: 12px 0; color: var(--text-dim); font-size: 13.5px;
+  }
+  .note strong { color: var(--text); }
+  .note code { background: var(--bg-elev-2); padding: 1px 6px; border-radius: 4px; color: var(--text); font-size: 12px; }
+
+  .tag-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .tag-grid .tag {
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    color: var(--text-dim); font-size: 12px; font-family: 'JetBrains Mono', monospace;
+  }
+  .tag-grid .tag.urgent { color: var(--danger); border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
+  .tag-grid .tag.other { color: var(--warning); border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.08); }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .content { padding: 24px 20px 60px; }
+    .hero h1 { font-size: 30px; }
+    .field-row { grid-template-columns: 1fr; gap: 4px; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1f2533; border-radius: 10px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #2c3243; }
+
+  .hidden { display: none !important; }
+  .footer { margin-top: 60px; padding-top: 28px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">C</div>
+    <div>
+      <div class="name">CUUB API <span class="sub">Documentation</span></div>
+    </div>
+  </div>
+  <div class="actions">
+    <div class="pill"><span class="dot"></span> All systems operational</div>
+    <a class="pill" href="/health" target="_blank" rel="noopener">Health check →</a>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="search" type="text" placeholder="Filter endpoints..." autocomplete="off" />
+    </div>
+
+    <div class="nav-group">
+      <h4>Getting Started</h4>
+      <a href="#overview">Overview</a>
+      <a href="#auth">Authentication</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Health</h4>
+      <a href="#health-check"><span class="method-tag GET">GET</span> Health check</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Users</h4>
+      <a href="#users-list"><span class="method-tag GET">GET</span> List users</a>
+      <a href="#users-get"><span class="method-tag GET">GET</span> Get user</a>
+      <a href="#users-create"><span class="method-tag POST">POST</span> Create user</a>
+      <a href="#users-update"><span class="method-tag PATCH">PATCH</span> Update user</a>
+      <a href="#users-delete"><span class="method-tag DELETE">DEL</span> Delete user</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Stations</h4>
+      <a href="#stations-list"><span class="method-tag GET">GET</span> List stations</a>
+      <a href="#stations-get"><span class="method-tag GET">GET</span> Get station</a>
+      <a href="#stations-export"><span class="method-tag GET">GET</span> Export CSV</a>
+      <a href="#stations-create"><span class="method-tag POST">POST</span> Create station</a>
+      <a href="#stations-update"><span class="method-tag PATCH">PATCH</span> Update station</a>
+      <a href="#stations-delete"><span class="method-tag DELETE">DEL</span> Delete station</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Tickets</h4>
+      <a href="#tickets-list"><span class="method-tag GET">GET</span> List tickets</a>
+      <a href="#tickets-get"><span class="method-tag GET">GET</span> Get ticket</a>
+      <a href="#tickets-create"><span class="method-tag POST">POST</span> Create ticket</a>
+      <a href="#tickets-update"><span class="method-tag PATCH">PATCH</span> Update ticket</a>
+      <a href="#tickets-delete"><span class="method-tag DELETE">DEL</span> Delete ticket</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Battery &amp; Scans</h4>
+      <a href="#battery-get"><span class="method-tag GET">GET</span> Battery by sticker</a>
+      <a href="#battery-scan"><span class="method-tag POST">POST</span> Create scan</a>
+      <a href="#battery-update"><span class="method-tag PATCH">PATCH</span> Update scan</a>
+      <a href="#scans-list"><span class="method-tag GET">GET</span> List scans</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Pop (Battery Release)</h4>
+      <a href="#pop-slot"><span class="method-tag POST">POST</span> Pop single slot</a>
+      <a href="#pop-all"><span class="method-tag POST">POST</span> Pop all slots</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>POS (Rents lifecycle)</h4>
+      <a href="#pos-start"><span class="method-tag POST">POST</span> Start rent</a>
+      <a href="#pos-end"><span class="method-tag PATCH">PATCH</span> End rent</a>
+      <a href="#pos-list"><span class="method-tag GET">GET</span> List rents</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Rents</h4>
+      <a href="#rents-station"><span class="method-tag GET">GET</span> Rents by station</a>
+      <a href="#rents-range"><span class="method-tag GET">GET</span> Rents by date range</a>
+      <a href="#rents-all"><span class="method-tag GET">GET</span> Rents (all stations)</a>
+      <a href="#rents-recent"><span class="method-tag GET">GET</span> Recent rents</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Token</h4>
+      <a href="#token-get"><span class="method-tag GET">GET</span> Retrieve token</a>
+    </div>
+
+    <div class="nav-group">
+      <h4>Stripe</h4>
+      <a href="#stripe-charges"><span class="method-tag GET">GET</span> List charges</a>
+      <a href="#stripe-balance"><span class="method-tag GET">GET</span> Balance transactions</a>
+    </div>
+  </aside>
+
+  <main class="content">
+    <section class="hero" id="overview">
+      <h1>CUUB API</h1>
+      <p>A complete reference for the CUUB platform API — manage users, stations, tickets, batteries, and rents. Every endpoint below includes the full request, required parameters, and an example response you can copy directly.</p>
+      <div class="base-url">
+        <span class="label">Base URL</span>
+        <span class="url">https://api.cuub.tech</span>
+      </div>
+    </section>
+
+    <section class="section" id="auth">
+      <h2>Authentication</h2>
+      <p class="lead">Most endpoints are reachable over HTTPS without a bearer token. The <code>/token</code> endpoint returns the Energo backend token, which is managed internally and refreshed automatically. The <code>/pos/*</code> endpoints (Rents lifecycle) are the exception — they require a shared secret; see the <a href="#sec-pos">POS section</a>.</p>
+      <div class="note"><strong>Tip:</strong> Replace <code>{id}</code>, <code>{station_id}</code>, or <code>{sticker_id}</code> placeholders in the examples with your own values.</div>
+    </section>
+
+    <!-- ========== HEALTH ========== -->
+    <section class="section" id="sec-health">
+      <h2>Health</h2>
+
+      <article class="endpoint" id="health-check" data-search="health check ok ping">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/health</span>
+        </div>
+        <h3>Health check</h3>
+        <p class="endpoint-desc">Check service health and availability.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/health</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"status"</span><span class="tk-punc">:</span> <span class="tk-str">"ok"</span><span class="tk-punc">,</span>
+  <span class="tk-key">"service"</span><span class="tk-punc">:</span> <span class="tk-str">"energo-token-extractor"</span><span class="tk-punc">,</span>
+  <span class="tk-key">"timestamp"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-02-06T19:41:35.755Z"</span>
+}</code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== USERS ========== -->
+    <section class="section" id="sec-users">
+      <h2>Users</h2>
+      <p class="lead">Manage platform users. Users can be of type <code>HOST</code>, <code>DISTRIBUTOR</code>, or <code>ADMIN</code>, and can be associated with one or more stations.</p>
+
+      <article class="endpoint" id="users-list" data-search="users list all fetch">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/users</span>
+        </div>
+        <h3>List all users</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/users</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    {
+      <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-str">"{id}"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"username"</span><span class="tk-punc">:</span> <span class="tk-str">"SilasMed"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"type"</span><span class="tk-punc">:</span> <span class="tk-str">"HOST"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"created_at"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-01-21T22:50:13.388Z"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"updated_at"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-01-21T22:50:13.388Z"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"stations"</span><span class="tk-punc">:</span> [<span class="tk-str">"{station_id}"</span>]
+    }
+  ]<span class="tk-punc">,</span>
+  <span class="tk-key">"count"</span><span class="tk-punc">:</span> <span class="tk-num">1</span>
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="users-get" data-search="user single get by id">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/users/<span class="param">{id}</span></span>
+        </div>
+        <h3>Get a user by ID</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/users/{id}</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-str">"{id}"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"username"</span><span class="tk-punc">:</span> <span class="tk-str">"SilasMed"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"type"</span><span class="tk-punc">:</span> <span class="tk-str">"HOST"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"created_at"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-01-21T22:50:13.388Z"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"updated_at"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-01-21T22:50:13.388Z"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"stations"</span><span class="tk-punc">:</span> [<span class="tk-str">"{station_id}"</span>]
+  }
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="users-create" data-search="user create new post">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/users</span>
+        </div>
+        <h3>Create a new user</h3>
+
+        <div class="subhead">Body parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">username</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">The unique username of the user.</div></div>
+          <div class="field-row"><div class="fname">type</div><div class="ftype">string <span class="opt">optional</span></div><div class="fdesc">One of <code>HOST</code>, <code>DISTRIBUTOR</code>, or <code>ADMIN</code>. Defaults to <code>HOST</code>.</div></div>
+          <div class="field-row"><div class="fname">station_id</div><div class="ftype">string <span class="opt">optional</span></div><div class="fdesc">A single station ID to associate with the user.</div></div>
+          <div class="field-row"><div class="fname">station_ids</div><div class="ftype">string[] <span class="opt">optional</span></div><div class="fdesc">Array of station IDs to associate with the user.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/users</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "username": "NewUser",
+    "type": "HOST",
+    "station_ids": ["{station_id}"]
+  }'</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-str">"{id}"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"username"</span><span class="tk-punc">:</span> <span class="tk-str">"NewUser"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"type"</span><span class="tk-punc">:</span> <span class="tk-str">"HOST"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"stations"</span><span class="tk-punc">:</span> [<span class="tk-str">"{station_id}"</span>]
+  }<span class="tk-punc">,</span>
+  <span class="tk-key">"message"</span><span class="tk-punc">:</span> <span class="tk-str">"User created successfully"</span>
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="users-update" data-search="user update patch edit">
+        <div class="endpoint-header">
+          <span class="method PATCH">PATCH</span>
+          <span class="path">/users/<span class="param">{id}</span></span>
+        </div>
+        <h3>Update a user</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X PATCH <span class="tk-url">https://api.cuub.tech/users/{id}</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "username": "UpdatedUser",
+    "type": "DISTRIBUTOR",
+    "station_ids": ["{station_id}"]
+  }'</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-str">"{id}"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"username"</span><span class="tk-punc">:</span> <span class="tk-str">"UpdatedUser"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"type"</span><span class="tk-punc">:</span> <span class="tk-str">"DISTRIBUTOR"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"stations"</span><span class="tk-punc">:</span> [<span class="tk-str">"{station_id}"</span>]
+  }<span class="tk-punc">,</span>
+  <span class="tk-key">"message"</span><span class="tk-punc">:</span> <span class="tk-str">"User updated successfully"</span>
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="users-delete" data-search="user delete remove">
+        <div class="endpoint-header">
+          <span class="method DELETE">DELETE</span>
+          <span class="path">/users/<span class="param">{id}</span></span>
+        </div>
+        <h3>Delete a user</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X DELETE <span class="tk-url">https://api.cuub.tech/users/{id}</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"message"</span><span class="tk-punc">:</span> <span class="tk-str">"User deleted successfully"</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-str">"{id}"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"username"</span><span class="tk-punc">:</span> <span class="tk-str">"SilasMed"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"type"</span><span class="tk-punc">:</span> <span class="tk-str">"HOST"</span>
+  }
+}</code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== STATIONS ========== -->
+    <section class="section" id="sec-stations">
+      <h2>Stations</h2>
+      <p class="lead">Manage physical CUUB stations. Each station has a geolocation, operating hours, and Stripe customer linkage.</p>
+
+      <article class="endpoint" id="stations-list" data-search="stations list all fetch">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/stations</span>
+        </div>
+        <h3>List all stations</h3>
+        <p class="endpoint-desc">Returns all stations with live slot counts and online status.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/stations</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    {
+      <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-str">"{station_id}"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"title"</span><span class="tk-punc">:</span> <span class="tk-str">"Station Name"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"latitude"</span><span class="tk-punc">:</span> <span class="tk-num">40.7128</span><span class="tk-punc">,</span>
+      <span class="tk-key">"longitude"</span><span class="tk-punc">:</span> <span class="tk-num">-74.006</span><span class="tk-punc">,</span>
+      <span class="tk-key">"stripe_id"</span><span class="tk-punc">:</span> <span class="tk-str">"cus_xxxxxxxxxxxx"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"weekday_hours"</span><span class="tk-punc">:</span> {
+        <span class="tk-key">"mon"</span><span class="tk-punc">:</span> { <span class="tk-key">"open"</span><span class="tk-punc">:</span> <span class="tk-str">"09:00"</span><span class="tk-punc">,</span> <span class="tk-key">"close"</span><span class="tk-punc">:</span> <span class="tk-str">"17:00"</span> }<span class="tk-punc">,</span>
+        <span class="tk-key">"tue"</span><span class="tk-punc">:</span> { <span class="tk-key">"open"</span><span class="tk-punc">:</span> <span class="tk-str">"09:00"</span><span class="tk-punc">,</span> <span class="tk-key">"close"</span><span class="tk-punc">:</span> <span class="tk-str">"17:00"</span> }
+      }<span class="tk-punc">,</span>
+      <span class="tk-key">"filled_slots"</span><span class="tk-punc">:</span> <span class="tk-num">4</span><span class="tk-punc">,</span>
+      <span class="tk-key">"open_slots"</span><span class="tk-punc">:</span> <span class="tk-num">2</span><span class="tk-punc">,</span>
+      <span class="tk-key">"online"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span>
+    }
+  ]<span class="tk-punc">,</span>
+  <span class="tk-key">"count"</span><span class="tk-punc">:</span> <span class="tk-num">1</span>
+}</code></pre>
+        </div>
+        <div class="note"><code>stripe_id</code> may be <code>null</code> if the station has no Stripe customer. <code>weekday_hours</code> is the parsed JSON object or <code>null</code> if unset.</div>
+      </article>
+
+      <article class="endpoint" id="stations-get" data-search="station single get by id">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/stations/<span class="param">{id}</span></span>
+        </div>
+        <h3>Get a station by ID</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/stations/{id}</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="stations-export" data-search="stations export csv download">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/stations/export</span>
+        </div>
+        <h3>Export stations as CSV</h3>
+        <p class="endpoint-desc">Downloads a CSV file with columns: <code>id</code>, <code>title</code>, <code>latitude</code>, <code>longitude</code>, <code>updated_at</code>, <code>address</code>, <code>screen_id</code>, <code>sim_id</code>, <code>stripe_id</code>, <code>weekday_hours</code>, <code>filled_slots</code>, <code>open_slots</code>, <code>online</code>.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/stations/export</span> <span class="tk-flag">-o</span> stations.csv</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="stations-create" data-search="station create new post">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/stations</span>
+        </div>
+        <h3>Create a new station</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/stations</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "id": "STATION001",
+    "title": "Main Street Station",
+    "latitude": 40.7128,
+    "longitude": -74.006
+  }'</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="stations-update" data-search="station update patch edit">
+        <div class="endpoint-header">
+          <span class="method PATCH">PATCH</span>
+          <span class="path">/stations/<span class="param">{id}</span></span>
+        </div>
+        <h3>Update a station</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X PATCH <span class="tk-url">https://api.cuub.tech/stations/{id}</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "title": "Updated Station Name",
+    "latitude": 40.75,
+    "longitude": -74.01
+  }'</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="stations-delete" data-search="station delete remove">
+        <div class="endpoint-header">
+          <span class="method DELETE">DELETE</span>
+          <span class="path">/stations/<span class="param">{id}</span></span>
+        </div>
+        <h3>Delete a station</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X DELETE <span class="tk-url">https://api.cuub.tech/stations/{id}</span></code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== TICKETS ========== -->
+    <section class="section" id="sec-tickets">
+      <h2>Tickets (Maintenance)</h2>
+      <p class="lead">Maintenance tickets are stored with a <code>station_id</code> that must exist in <code>stations</code>. Each ticket carries an <em>array</em> of task labels — a legacy single string is accepted and treated as a one-element array.</p>
+
+      <div class="note">
+        <strong>Task labels</strong> (use for multi-select UIs):
+        <div class="tag-grid">
+          <span class="tag">High Batteries</span>
+          <span class="tag">Low Batteries</span>
+          <span class="tag">No Batteries</span>
+          <span class="tag">Add Stack</span>
+          <span class="tag">Broken Battery</span>
+          <span class="tag">High Failure Rates</span>
+          <span class="tag">Hardware Malfunction</span>
+          <span class="tag">Unusually Offline</span>
+          <span class="tag urgent">Urgent Other</span>
+          <span class="tag other">Other</span>
+        </div>
+        <strong>UI hint:</strong> style <code>Urgent Other</code> as highest-priority (red), and <code>Other</code> as lower-priority (yellow).
+      </div>
+
+      <article class="endpoint" id="tickets-list" data-search="tickets list all fetch filter task">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/tickets</span>
+        </div>
+        <h3>List all tickets</h3>
+        <p class="endpoint-desc">Optionally filter by one or more task labels. Filtering uses PostgreSQL array overlap — tickets are included if their <code>task</code> array contains <em>any</em> of the filter values.</p>
+
+        <div class="subhead">Query parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">task</div><div class="ftype">string[] <span class="opt">optional, repeatable</span></div><div class="fdesc">Filter to tickets whose <code>task</code> array contains any of the provided labels.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -G <span class="tk-url">"https://api.cuub.tech/tickets"</span> \
+  <span class="tk-flag">--data-urlencode</span> <span class="tk-str">"task=Low Batteries"</span> \
+  <span class="tk-flag">--data-urlencode</span> <span class="tk-str">"task=Other"</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    {
+      <span class="tk-key">"id"</span><span class="tk-punc">:</span> <span class="tk-num">1</span><span class="tk-punc">,</span>
+      <span class="tk-key">"location_name"</span><span class="tk-punc">:</span> <span class="tk-str">"Kizami Sushi"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"station_id"</span><span class="tk-punc">:</span> <span class="tk-str">"{station_id}"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"latitude"</span><span class="tk-punc">:</span> <span class="tk-num">41.88</span><span class="tk-punc">,</span>
+      <span class="tk-key">"longitude"</span><span class="tk-punc">:</span> <span class="tk-num">-87.63</span><span class="tk-punc">,</span>
+      <span class="tk-key">"task"</span><span class="tk-punc">:</span> [<span class="tk-str">"Low Batteries"</span><span class="tk-punc">,</span> <span class="tk-str">"Hardware Malfunction"</span>]<span class="tk-punc">,</span>
+      <span class="tk-key">"description"</span><span class="tk-punc">:</span> <span class="tk-str">"Optional notes"</span>
+    }
+  ]<span class="tk-punc">,</span>
+  <span class="tk-key">"count"</span><span class="tk-punc">:</span> <span class="tk-num">1</span>
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="tickets-get" data-search="ticket single get by id">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/tickets/<span class="param">{id}</span></span>
+        </div>
+        <h3>Get a ticket by ID</h3>
+        <p class="endpoint-desc"><code>{id}</code> is the numeric ticket primary key (not a station id).</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/tickets/{id}</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="tickets-create" data-search="ticket create new post">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/tickets</span>
+        </div>
+        <h3>Create a new ticket</h3>
+
+        <div class="subhead">Body parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">location_name</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Human-readable location name.</div></div>
+          <div class="field-row"><div class="fname">station_id</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Must match an existing <code>stations.id</code>.</div></div>
+          <div class="field-row"><div class="fname">latitude</div><div class="ftype">number <span class="req">required</span></div><div class="fdesc">Between -90 and 90.</div></div>
+          <div class="field-row"><div class="fname">longitude</div><div class="ftype">number <span class="req">required</span></div><div class="fdesc">Between -180 and 180.</div></div>
+          <div class="field-row"><div class="fname">task</div><div class="ftype">string[] <span class="req">required</span></div><div class="fdesc">Non-empty array of labels from the task list above (duplicates deduplicated).</div></div>
+          <div class="field-row"><div class="fname">description</div><div class="ftype">string <span class="opt">optional</span></div><div class="fdesc">Free-form notes.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/tickets</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "location_name": "Kizami Sushi",
+    "station_id": "{station_id}",
+    "latitude": 41.88,
+    "longitude": -87.63,
+    "task": ["Low Batteries", "Hardware Malfunction"],
+    "description": "Optional notes"
+  }'</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="tickets-update" data-search="ticket update patch edit">
+        <div class="endpoint-header">
+          <span class="method PATCH">PATCH</span>
+          <span class="path">/tickets/<span class="param">{id}</span></span>
+        </div>
+        <h3>Update a ticket</h3>
+        <p class="endpoint-desc">Send at least one field. If updating coordinates, send both <code>latitude</code> and <code>longitude</code> together. If updating <code>task</code>, send a non-empty array (replaces the whole list).</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X PATCH <span class="tk-url">https://api.cuub.tech/tickets/{id}</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "location_name": "Updated location name",
+    "task": ["Hardware Malfunction", "Urgent Other"],
+    "description": "Updated notes"
+  }'</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="tickets-delete" data-search="ticket delete remove">
+        <div class="endpoint-header">
+          <span class="method DELETE">DELETE</span>
+          <span class="path">/tickets/<span class="param">{id}</span></span>
+        </div>
+        <h3>Delete a ticket</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X DELETE <span class="tk-url">https://api.cuub.tech/tickets/{id}</span></code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== BATTERY & SCANS ========== -->
+    <section class="section" id="sec-battery">
+      <h2>Battery &amp; Scans</h2>
+      <p class="lead">Track individual batteries by sticker, record scan events, and query rental duration.</p>
+
+      <article class="endpoint" id="battery-get" data-search="battery sticker fetch info">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/battery/<span class="param">{sticker_id}</span></span>
+        </div>
+        <h3>Get battery info by sticker ID</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/battery/{sticker_id}</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"manufacture_id"</span><span class="tk-punc">:</span> <span class="tk-str">"CUBH5A000513"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"sticker_id"</span><span class="tk-punc">:</span> <span class="tk-str">"A201"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"startTime"</span><span class="tk-punc">:</span> <span class="tk-str">"1736188800000"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"returnTime"</span><span class="tk-punc">:</span> <span class="tk-str">"1736275200000"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"duration"</span><span class="tk-punc">:</span> <span class="tk-str">"18:40:00"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"amountPaid"</span><span class="tk-punc">:</span> <span class="tk-num">6</span>
+  }
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="battery-scan" data-search="battery scan create post record">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/battery/<span class="param">{sticker_id}</span></span>
+        </div>
+        <h3>Create a scan record</h3>
+        <p class="endpoint-desc">Records a scan for a battery. <code>sticker_type</code> is taken from <code>battery.type</code> in the database.</p>
+
+        <div class="subhead">Headers</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">manufacture_id</div><div class="ftype">string <span class="opt">optional</span></div><div class="fdesc">Required only if the battery has no <code>manufacture_id</code> in the database.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/battery/{sticker_id}</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"manufacture_id: CUBH5A000513"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{}'</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="battery-update" data-search="battery scan update patch sizl">
+        <div class="endpoint-header">
+          <span class="method PATCH">PATCH</span>
+          <span class="path">/battery/<span class="param">{sticker_id}</span></span>
+        </div>
+        <h3>Update a scan record</h3>
+        <p class="endpoint-desc">Updates the most recent scan for the given sticker ID.</p>
+
+        <div class="subhead">Headers</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">manufacture_id</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">The battery's manufacture ID.</div></div>
+          <div class="field-row"><div class="fname">sticker_type</div><div class="ftype">string <span class="opt">optional</span></div><div class="fdesc">Override sticker type (e.g. <code>NFC</code>).</div></div>
+        </div>
+
+        <div class="subhead">Body parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">sizl</div><div class="ftype">boolean <span class="opt">optional</span></div><div class="fdesc">Sizzle flag.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X PATCH <span class="tk-url">https://api.cuub.tech/battery/{sticker_id}</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"manufacture_id: CUBH5A000513"</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"sticker_type: NFC"</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{"sizl": true}'</span></code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="scans-list" data-search="scans list all fetch">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/scans</span>
+        </div>
+        <h3>List all scans</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/scans</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    {
+      <span class="tk-key">"scan_id"</span><span class="tk-punc">:</span> <span class="tk-str">"125"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"sticker_id"</span><span class="tk-punc">:</span> <span class="tk-str">"A201"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"order_id"</span><span class="tk-punc">:</span> <span class="tk-null">null</span><span class="tk-punc">,</span>
+      <span class="tk-key">"scan_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-02-06T19:41:35.755Z"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"sticker_type"</span><span class="tk-punc">:</span> <span class="tk-str">"Blue"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"sizl"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span>
+    }
+  ]<span class="tk-punc">,</span>
+  <span class="tk-key">"count"</span><span class="tk-punc">:</span> <span class="tk-num">1</span>
+}</code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== POP ========== -->
+    <section class="section" id="sec-pop">
+      <h2>Pop (Battery Release)</h2>
+      <p class="lead">Release batteries from a specific slot or all slots on a station.</p>
+
+      <article class="endpoint" id="pop-slot" data-search="pop battery release slot specific">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/pop/<span class="param">{station_id}</span>/<span class="param">{slot}</span></span>
+        </div>
+        <h3>Pop a battery from a specific slot</h3>
+        <p class="endpoint-desc">Slot must be between 1 and 6.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/pop/STATION001/3</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    { <span class="tk-key">"slot"</span><span class="tk-punc">:</span> <span class="tk-num">3</span><span class="tk-punc">,</span> <span class="tk-key">"manufacture_id"</span><span class="tk-punc">:</span> <span class="tk-str">"CUBH5A000513"</span> }
+  ]<span class="tk-punc">,</span>
+  <span class="tk-key">"count"</span><span class="tk-punc">:</span> <span class="tk-num">1</span>
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="pop-all" data-search="pop battery release all slots">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/pop/<span class="param">{station_id}</span>/all</span>
+        </div>
+        <h3>Pop all batteries from all slots</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/pop/{station_id}/all</span></code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== POS (Rents lifecycle) ========== -->
+    <section class="section" id="sec-pos">
+      <h2>POS (Rents lifecycle)</h2>
+      <p class="lead">Record the rent lifecycle in <code>POS-DB.rents</code>: start a rent when a powerbank is taken, close it when it's returned, and list all rent rows. <code>rent_id</code> is auto-generated as <code>R#####</code>; <code>stripe_pi</code> is unique per rent.</p>
+
+      <div class="note">
+        <strong>Authentication:</strong> every <code>/pos/*</code> request must include the shared <code>POS_API_TOKEN</code> secret as <code>Authorization: Bearer &lt;token&gt;</code> <strong>or</strong> <code>x-api-key: &lt;token&gt;</code>.<br>
+        Errors: <code>401</code> if no header is sent, <code>403</code> if the token is wrong, <code>503</code> if the server has no <code>POS_API_TOKEN</code> configured (fail-closed).
+      </div>
+
+      <article class="endpoint" id="pos-start" data-search="pos rent start new battery rental insert">
+        <div class="endpoint-header">
+          <span class="method POST">POST</span>
+          <span class="path">/pos/start_rent</span>
+        </div>
+        <h3>Start a new rent</h3>
+        <p class="endpoint-desc">Records a new rent when the powerbank is taken. <code>rent_id</code> is generated server-side.</p>
+
+        <div class="subhead">Body parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">stripe_pi</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Unique Stripe Payment Intent id for the rent.</div></div>
+          <div class="field-row"><div class="fname">station_start</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Station id where the rent began.</div></div>
+          <div class="field-row"><div class="fname">battery_id</div><div class="ftype">bigint <span class="opt">optional</span></div><div class="fdesc">Numeric id of the rented battery.</div></div>
+          <div class="field-row"><div class="fname">start_time</div><div class="ftype">ISO timestamp <span class="opt">optional</span></div><div class="fdesc">Defaults to server <code>now()</code> if omitted.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X POST <span class="tk-url">https://api.cuub.tech/pos/start_rent</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Authorization: Bearer $POS_API_TOKEN"</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "battery_id": 1042,
+    "stripe_pi": "pi_3OabCdEfGhIjKlMn0001",
+    "station_start": "STATION001"
+  }'</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"rent_id"</span><span class="tk-punc">:</span> <span class="tk-str">"R00042"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"battery_id"</span><span class="tk-punc">:</span> <span class="tk-str">"1042"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"stripe_pi"</span><span class="tk-punc">:</span> <span class="tk-str">"pi_3OabCdEfGhIjKlMn0001"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"start_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-05-02T18:00:00.000Z"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"station_start"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION001"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"end_time"</span><span class="tk-punc">:</span> <span class="tk-null">null</span><span class="tk-punc">,</span>
+    <span class="tk-key">"station_end"</span><span class="tk-punc">:</span> <span class="tk-null">null</span>
+  }<span class="tk-punc">,</span>
+  <span class="tk-key">"message"</span><span class="tk-punc">:</span> <span class="tk-str">"Rent started successfully"</span>
+}</code></pre>
+        </div>
+
+        <div class="note">
+          <strong>Error responses</strong><br>
+          • <code>400</code> Missing/invalid field (e.g. non-integer <code>battery_id</code>, blank <code>stripe_pi</code>).<br>
+          • <code>409</code> Duplicate <code>stripe_pi</code> — a rent already exists for that payment intent.
+        </div>
+      </article>
+
+      <article class="endpoint" id="pos-end" data-search="pos rent end close return battery patch update powerbank">
+        <div class="endpoint-header">
+          <span class="method PATCH">PATCH</span>
+          <span class="path">/pos/end_rent</span>
+        </div>
+        <h3>End a rent (battery returned)</h3>
+        <p class="endpoint-desc">Closes the currently-open rent for the returned powerbank by writing <code>end_time</code> and <code>station_end</code>. The rent is identified by <code>battery_id</code> — the endpoint locates the single rent with that <code>battery_id</code> where <code>end_time IS NULL</code>.</p>
+
+        <div class="subhead">Body parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">battery_id</div><div class="ftype">bigint <span class="req">required</span></div><div class="fdesc">Id of the returned powerbank. The open rent for this battery is closed.</div></div>
+          <div class="field-row"><div class="fname">station_end</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Station id where the battery was returned.</div></div>
+          <div class="field-row"><div class="fname">end_time</div><div class="ftype">ISO timestamp <span class="opt">optional</span></div><div class="fdesc">Defaults to current server time if omitted.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X PATCH <span class="tk-url">https://api.cuub.tech/pos/end_rent</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Authorization: Bearer $POS_API_TOKEN"</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Content-Type: application/json"</span> \
+  <span class="tk-flag">-d</span> <span class="tk-str">'{
+    "battery_id": 1042,
+    "station_end": "STATION007"
+  }'</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"rent_id"</span><span class="tk-punc">:</span> <span class="tk-str">"R00042"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"battery_id"</span><span class="tk-punc">:</span> <span class="tk-str">"1042"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"stripe_pi"</span><span class="tk-punc">:</span> <span class="tk-str">"pi_3OabCdEfGhIjKlMn0001"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"start_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-05-02T18:00:00.000Z"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"station_start"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION001"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"end_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-05-02T20:30:00.000Z"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"station_end"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION007"</span>
+  }<span class="tk-punc">,</span>
+  <span class="tk-key">"message"</span><span class="tk-punc">:</span> <span class="tk-str">"Rent ended successfully"</span>
+}</code></pre>
+        </div>
+
+        <div class="note">
+          <strong>Error responses</strong><br>
+          • <code>400</code> Missing/invalid <code>battery_id</code>, blank <code>station_end</code>, or malformed <code>end_time</code>.<br>
+          • <code>404</code> No rent exists for the supplied <code>battery_id</code>.<br>
+          • <code>409</code> Every rent for that battery is already closed, <strong>or</strong> more than one open rent exists for the same battery (response includes the conflicting <code>rent_ids</code>).
+        </div>
+      </article>
+
+      <article class="endpoint" id="pos-list" data-search="pos rents list all fetch">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/pos/rents</span>
+        </div>
+        <h3>List all rents</h3>
+        <p class="endpoint-desc">Returns every row in <code>POS-DB.rents</code>, newest first by <code>start_time</code>.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/pos/rents</span> \
+  <span class="tk-flag">-H</span> <span class="tk-str">"Authorization: Bearer $POS_API_TOKEN"</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    {
+      <span class="tk-key">"rent_id"</span><span class="tk-punc">:</span> <span class="tk-str">"R00042"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"battery_id"</span><span class="tk-punc">:</span> <span class="tk-str">"1042"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"stripe_pi"</span><span class="tk-punc">:</span> <span class="tk-str">"pi_3OabCdEfGhIjKlMn0001"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"start_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-05-02T18:00:00.000Z"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"station_start"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION001"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"end_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-05-02T20:30:00.000Z"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"station_end"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION007"</span>
+    }<span class="tk-punc">,</span>
+    {
+      <span class="tk-key">"rent_id"</span><span class="tk-punc">:</span> <span class="tk-str">"R00041"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"battery_id"</span><span class="tk-punc">:</span> <span class="tk-null">null</span><span class="tk-punc">,</span>
+      <span class="tk-key">"stripe_pi"</span><span class="tk-punc">:</span> <span class="tk-str">"pi_3OabCdEfGhIjKlMn0000"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"start_time"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-05-02T17:10:00.000Z"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"station_start"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION002"</span><span class="tk-punc">,</span>
+      <span class="tk-key">"end_time"</span><span class="tk-punc">:</span> <span class="tk-null">null</span><span class="tk-punc">,</span>
+      <span class="tk-key">"station_end"</span><span class="tk-punc">:</span> <span class="tk-null">null</span>
+    }
+  ]<span class="tk-punc">,</span>
+  <span class="tk-key">"count"</span><span class="tk-punc">:</span> <span class="tk-num">2</span>
+}</code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== RENTS ========== -->
+    <section class="section" id="sec-rents">
+      <h2>Rents</h2>
+      <p class="lead">Rent data comes from Stripe balance transactions, aggregated by date or by station. Date ranges use <code>YYYY-MM-DD_YYYY-MM-DD</code> (America/Chicago).</p>
+
+      <article class="endpoint" id="rents-station" data-search="rents station date range revenue">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/rents/<span class="param">{station_id}</span>/<span class="param">{startDate}_{endDate}</span></span>
+        </div>
+        <h3>Rent data for a station within a date range</h3>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/rents/STATION001/2026-01-01_2026-01-31</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> {
+    <span class="tk-key">"station_id"</span><span class="tk-punc">:</span> <span class="tk-str">"STATION001"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"dateRange"</span><span class="tk-punc">:</span> <span class="tk-str">"2026-01-01_2026-01-31"</span><span class="tk-punc">,</span>
+    <span class="tk-key">"totalAmount"</span><span class="tk-punc">:</span> <span class="tk-num">45.50</span><span class="tk-punc">,</span>
+    <span class="tk-key">"totalRents"</span><span class="tk-punc">:</span> <span class="tk-num">15</span>
+  }
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="rents-range" data-search="rents date range day comparison">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/rents/<span class="param">{dateRange}</span></span>
+        </div>
+        <h3>Rents by date range (with previous-month comparison)</h3>
+        <p class="endpoint-desc">Per-day rent count and net sum from Stripe balance transactions. Includes previous-month comparison (<code>ppositive</code>, <code>pnegative</code>, <code>prents</code>, <code>pmoney</code>). Filtered by <code>REVENUE_TYPES</code>.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/rents/2025-02-01_2025-02-08</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"range"</span><span class="tk-punc">:</span> <span class="tk-str">"Feb 1, 2025 – Feb 8, 2025"</span><span class="tk-punc">,</span>
+  <span class="tk-key">"positive"</span><span class="tk-punc">:</span> <span class="tk-num">426</span><span class="tk-punc">,</span>
+  <span class="tk-key">"negative"</span><span class="tk-punc">:</span> <span class="tk-num">-57</span><span class="tk-punc">,</span>
+  <span class="tk-key">"ppositive"</span><span class="tk-punc">:</span> <span class="tk-num">380</span><span class="tk-punc">,</span>
+  <span class="tk-key">"pnegative"</span><span class="tk-punc">:</span> <span class="tk-num">-42</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    { <span class="tk-key">"date"</span><span class="tk-punc">:</span> <span class="tk-str">"Feb 1, 2025"</span><span class="tk-punc">,</span> <span class="tk-key">"rents"</span><span class="tk-punc">:</span> <span class="tk-num">5</span><span class="tk-punc">,</span> <span class="tk-key">"money"</span><span class="tk-punc">:</span> <span class="tk-str">"$15"</span> }<span class="tk-punc">,</span>
+    { <span class="tk-key">"date"</span><span class="tk-punc">:</span> <span class="tk-str">"Feb 2, 2025"</span><span class="tk-punc">,</span> <span class="tk-key">"rents"</span><span class="tk-punc">:</span> <span class="tk-num">6</span><span class="tk-punc">,</span> <span class="tk-key">"money"</span><span class="tk-punc">:</span> <span class="tk-str">"$18"</span> }
+  ]
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="rents-all" data-search="rents all stations revenue by station">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/rents/<span class="param">{dateRange}</span>/all</span>
+        </div>
+        <h3>Rents by date range — all stations</h3>
+        <p class="endpoint-desc">Net revenue per station: <code>money = positive − negative</code>. Only stations with at least one charge in the period and existing in the DB.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/rents/2025-02-01_2025-02-08/all</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"range"</span><span class="tk-punc">:</span> <span class="tk-str">"Feb 1, 2025 – Feb 8, 2025"</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [
+    { <span class="tk-key">"station_title"</span><span class="tk-punc">:</span> <span class="tk-str">"Annoyance Theater"</span><span class="tk-punc">,</span> <span class="tk-key">"stripe_id"</span><span class="tk-punc">:</span> <span class="tk-str">"cus_TeYJ78uzshxpCu"</span><span class="tk-punc">,</span> <span class="tk-key">"money"</span><span class="tk-punc">:</span> <span class="tk-num">120.5</span> }<span class="tk-punc">,</span>
+    { <span class="tk-key">"station_title"</span><span class="tk-punc">:</span> <span class="tk-str">"Kizami Sushi"</span><span class="tk-punc">,</span> <span class="tk-key">"stripe_id"</span><span class="tk-punc">:</span> <span class="tk-str">"cus_TvTm9txqLOIDGI"</span><span class="tk-punc">,</span> <span class="tk-key">"money"</span><span class="tk-punc">:</span> <span class="tk-num">85.25</span> }
+  ]
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="rents-recent" data-search="rents recent limit latest">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/rents/recent</span>
+        </div>
+        <h3>Recent rents (limit only)</h3>
+        <p class="endpoint-desc">Aggregated rents for the most recent N balance transactions, with no date filter.</p>
+
+        <div class="subhead">Query parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">limit</div><div class="ftype">number <span class="opt">optional</span></div><div class="fdesc">Number of balance transactions to include. Default <code>10</code>, max <code>100</code>.</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> <span class="tk-url">"https://api.cuub.tech/rents/recent?limit=10"</span></code></pre>
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== TOKEN ========== -->
+    <section class="section" id="sec-token">
+      <h2>Token</h2>
+
+      <article class="endpoint" id="token-get" data-search="token energo login captcha jwt">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/token</span>
+        </div>
+        <h3>Retrieve Energo API token</h3>
+        <p class="endpoint-desc">Performs login to the Energo backend (with captcha solving via OpenAI), saves the token to the database, and returns it.</p>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> -X GET <span class="tk-url">https://api.cuub.tech/token</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"token"</span><span class="tk-punc">:</span> <span class="tk-str">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>
+}</code></pre>
+        </div>
+
+        <div class="note">
+          <strong>Error responses</strong><br>
+          • <code>401</code> Login failed (invalid credentials)<br>
+          • <code>500</code> Missing env vars (<code>ENERGO_USERNAME</code>, <code>ENERGO_PASSWORD</code>, <code>OPENAI_API_KEY</code>) or token capture failure
+        </div>
+      </article>
+    </section>
+
+    <!-- ========== STRIPE ========== -->
+    <section class="section" id="sec-stripe">
+      <h2>Stripe</h2>
+      <p class="lead">Direct pass-through endpoints for Stripe charges and balance transactions. Both require a <code>STRIPE_SECRET_KEY</code> and a date range.</p>
+
+      <article class="endpoint" id="stripe-charges" data-search="stripe charges list date range">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/stripe/charges</span>
+        </div>
+        <h3>List charges</h3>
+        <p class="endpoint-desc">Returns all Stripe charges in a date range (paginated until complete).</p>
+
+        <div class="subhead">Query parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">from</div><div class="ftype">YYYY-MM-DD <span class="req">required</span></div><div class="fdesc">Start date (America/Chicago).</div></div>
+          <div class="field-row"><div class="fname">to</div><div class="ftype">YYYY-MM-DD <span class="req">required</span></div><div class="fdesc">End date (America/Chicago).</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> <span class="tk-url">"https://api.cuub.tech/stripe/charges?from=2025-02-01&to=2025-02-08"</span></code></pre>
+        </div>
+
+        <div class="subhead">Response</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">JSON</span><button class="copy-btn">Copy</button></div>
+<pre><code>{
+  <span class="tk-key">"success"</span><span class="tk-punc">:</span> <span class="tk-bool">true</span><span class="tk-punc">,</span>
+  <span class="tk-key">"data"</span><span class="tk-punc">:</span> [ <span class="tk-comment">/* Stripe charge objects */</span> ]<span class="tk-punc">,</span>
+  <span class="tk-key">"has_more"</span><span class="tk-punc">:</span> <span class="tk-bool">false</span>
+}</code></pre>
+        </div>
+      </article>
+
+      <article class="endpoint" id="stripe-balance" data-search="stripe balance transactions list">
+        <div class="endpoint-header">
+          <span class="method GET">GET</span>
+          <span class="path">/stripe/balance-transactions</span>
+        </div>
+        <h3>List balance transactions</h3>
+        <p class="endpoint-desc">Returns all Stripe balance transactions in a date range (paginated until complete).</p>
+
+        <div class="subhead">Query parameters</div>
+        <div class="fields">
+          <div class="field-row"><div class="fname">from</div><div class="ftype">YYYY-MM-DD <span class="req">required</span></div><div class="fdesc">Start date (America/Chicago).</div></div>
+          <div class="field-row"><div class="fname">to</div><div class="ftype">YYYY-MM-DD <span class="req">required</span></div><div class="fdesc">End date (America/Chicago).</div></div>
+        </div>
+
+        <div class="subhead">Request</div>
+        <div class="code-wrap" data-copy>
+          <div class="tabs"><span class="lang">cURL</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="tk-kw">curl</span> <span class="tk-url">"https://api.cuub.tech/stripe/balance-transactions?from=2025-02-01&to=2025-02-08"</span></code></pre>
+        </div>
+      </article>
+    </section>
+
+    <div class="footer">CUUB API • Built with care • <a href="/health">Service status</a></div>
+  </main>
+</div>
+
+<script>
+  // Copy buttons
+  document.querySelectorAll('.code-wrap[data-copy]').forEach(wrap => {
+    const btn = wrap.querySelector('.copy-btn');
+    const code = wrap.querySelector('pre code');
+    if (!btn || !code) return;
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.innerText);
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.classList.remove('copied');
+        }, 1500);
+      } catch (err) {
+        console.error('Copy failed:', err);
+      }
+    });
+  });
+
+  // Active nav highlight on scroll
+  const sections = [...document.querySelectorAll('.endpoint[id]')];
+  const navLinks = [...document.querySelectorAll('.sidebar a[href^="#"]')];
+  const linkMap = new Map(navLinks.map(a => [a.getAttribute('href').slice(1), a]));
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        const id = e.target.id;
+        navLinks.forEach(a => a.classList.remove('active'));
+        const link = linkMap.get(id);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+  sections.forEach(s => io.observe(s));
+
+  // Sidebar search filter
+  const search = document.getElementById('search');
+  if (search) {
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      navLinks.forEach(a => {
+        const id = a.getAttribute('href').slice(1);
+        const ep = document.getElementById(id);
+        const haystack = (
+          a.textContent + ' ' +
+          (ep && ep.getAttribute('data-search') || '') + ' ' +
+          (ep && ep.querySelector('.path')?.textContent || '')
+        ).toLowerCase();
+        a.style.display = !q || haystack.includes(q) ? '' : 'none';
+      });
+      document.querySelectorAll('.nav-group').forEach(group => {
+        const visibleLinks = [...group.querySelectorAll('a')].some(a => a.style.display !== 'none');
+        group.style.display = visibleLinks ? '' : 'none';
+      });
+    });
+  }
+</script>
+</body>
+</html>

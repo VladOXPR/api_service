@@ -125,6 +125,23 @@ try {
   });
 }
 
+// Load POS (rents) routes with error handling
+let posRoutes;
+try {
+  posRoutes = require('./pos_service');
+  console.log('✅ POS service API routes loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading POS service API routes:', error);
+  console.error('Error stack:', error.stack);
+  posRoutes = express.Router();
+  posRoutes.get('*', (req, res) => {
+    res.status(500).json({
+      success: false,
+      error: 'POS service API not available: ' + error.message
+    });
+  });
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -138,6 +155,17 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
+
+/**
+ * Human-friendly API documentation page.
+ * Served before express.json() middleware since it just returns a static file.
+ */
+app.get(['/docs', '/docs/'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'docs.html'));
+});
+
+// Serve static assets (logos, css, etc.) from /public
+app.use('/public', express.static(path.join(__dirname, 'public')));
 
 // Middleware
 app.use(express.json());
@@ -167,6 +195,10 @@ console.log('🔗 Scan routes mounted at root path');
 app.use('/', maintenanceRoutes);
 console.log('🔗 Maintenance routes mounted at root path');
 
+// Mount POS (rents lifecycle) routes
+app.use('/', posRoutes);
+console.log('🔗 POS routes mounted at root path');
+
 // Debug: Log all registered routes (development only)
 if (process.env.NODE_ENV !== 'production') {
   app._router.stack.forEach((middleware) => {
@@ -185,6 +217,7 @@ try {
         console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
         console.log(`📡 GET endpoint available at: http://0.0.0.0:${PORT}/token`);
         console.log(`❤️  Health check available at: http://0.0.0.0:${PORT}/health`);
+        console.log(`📖 API docs available at: http://0.0.0.0:${PORT}/docs`);
         console.log(`✅ Server is ready to accept connections`);
     });
         

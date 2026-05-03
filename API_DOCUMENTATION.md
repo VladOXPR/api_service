@@ -712,9 +712,180 @@ curl -X POST https://api.cuub.tech/pop/{station_id}/all
 
 ---
 
+## POS (Rents lifecycle)
+
+POS endpoints record the **rent lifecycle** in the dedicated `POS-DB.rents` table. Use these from the point-of-sale flow when a user takes a powerbank (`start_rent`) and when they return it (`end_rent`).
+
+### Authentication
+
+Every `/pos/*` request must include the shared `POS_API_TOKEN` secret. Send it as **either**:
+
+- `Authorization: Bearer <POS_API_TOKEN>`, or
+- `x-api-key: <POS_API_TOKEN>`
+
+Rotate the token by updating the `POS_API_TOKEN` env var on the server (`.env` locally, Cloud Run env on prod) and on every POS client.
+
+**Auth error responses**
+
+- `401 Unauthorized` — no token header was sent.
+- `403 Forbidden` — the token didn't match the configured secret.
+- `503 Service Unavailable` — the server has no `POS_API_TOKEN` configured (fail-closed).
+
+**Table fields**
+
+- `rent_id` (`char(6)`): primary key, auto-generated as `R#####` (e.g. `R00042`).
+- `battery_id` (`bigint`, nullable): the rented battery.
+- `stripe_pi` (`text`, unique): Stripe Payment Intent id captured at checkout.
+- `start_time` (`timestamptz`): defaults to `now()` if omitted.
+- `station_start` (`text`): station id where the battery was taken.
+- `end_time` (`timestamptz`, nullable): set on return.
+- `station_end` (`text`, nullable): station id where the battery was returned.
+
+### 24. Start a new rent
+
+Records a new rent when the powerbank is taken. `rent_id` is generated server-side.
+
+```bash
+curl -X POST https://api.cuub.tech/pos/start_rent \
+  -H "Authorization: Bearer $POS_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "battery_id": 1042,
+    "stripe_pi": "pi_3OabCdEfGhIjKlMn0001",
+    "station_start": "STATION001"
+  }'
+```
+
+**Body fields**
+
+- `stripe_pi` (required): unique Stripe Payment Intent id.
+- `station_start` (required): station id where the rent began.
+- `battery_id` (optional): bigint id of the rented battery.
+- `start_time` (optional): ISO timestamp; defaults to server `now()`.
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "rent_id": "R00042",
+    "battery_id": "1042",
+    "stripe_pi": "pi_3OabCdEfGhIjKlMn0001",
+    "start_time": "2026-05-02T18:00:00.000Z",
+    "station_start": "STATION001",
+    "end_time": null,
+    "station_end": null
+  },
+  "message": "Rent started successfully"
+}
+```
+
+**Error responses**
+
+- `400`: missing/invalid field (e.g. non-integer `battery_id`, blank `stripe_pi`).
+- `409`: duplicate `stripe_pi` (a rent already exists for that payment intent).
+
+### 25. End a rent (battery returned)
+
+Closes the currently-open rent for the returned powerbank by writing `end_time` and `station_end`. The rent is identified by `battery_id`: the endpoint locates the single rent with that `battery_id` where `end_time IS NULL`.
+
+```bash
+curl -X PATCH https://api.cuub.tech/pos/end_rent \
+  -H "Authorization: Bearer $POS_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "battery_id": 1042,
+    "station_end": "STATION007"
+  }'
+```
+
+You can override the timestamp if you're recording a return after the fact:
+
+```bash
+curl -X PATCH https://api.cuub.tech/pos/end_rent \
+  -H "Authorization: Bearer $POS_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "battery_id": 1042,
+    "station_end": "STATION007",
+    "end_time": "2026-05-02T20:30:00.000Z"
+  }'
+```
+
+**Body fields**
+
+- `battery_id` (required): bigint id of the returned powerbank. The open rent for this battery is closed.
+- `station_end` (required): station id where the battery was returned.
+- `end_time` (optional): ISO timestamp; defaults to the current server time.
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "rent_id": "R00042",
+    "battery_id": "1042",
+    "stripe_pi": "pi_3OabCdEfGhIjKlMn0001",
+    "start_time": "2026-05-02T18:00:00.000Z",
+    "station_start": "STATION001",
+    "end_time": "2026-05-02T20:30:00.000Z",
+    "station_end": "STATION007"
+  },
+  "message": "Rent ended successfully"
+}
+```
+
+**Error responses**
+
+- `400`: missing/invalid `battery_id`, blank `station_end`, or malformed `end_time`.
+- `404`: no rent exists for the supplied `battery_id`.
+- `409`: every rent for that battery is already closed (no open rent to end), **or** more than one open rent exists for the same battery (data anomaly — response includes the conflicting `rent_ids`).
+
+### 26. List all rents
+
+Returns every row in `POS-DB.rents`, newest first by `start_time`.
+
+```bash
+curl -X GET https://api.cuub.tech/pos/rents \
+  -H "Authorization: Bearer $POS_API_TOKEN"
+```
+
+**Expected response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "rent_id": "R00042",
+      "battery_id": "1042",
+      "stripe_pi": "pi_3OabCdEfGhIjKlMn0001",
+      "start_time": "2026-05-02T18:00:00.000Z",
+      "station_start": "STATION001",
+      "end_time": "2026-05-02T20:30:00.000Z",
+      "station_end": "STATION007"
+    },
+    {
+      "rent_id": "R00041",
+      "battery_id": null,
+      "stripe_pi": "pi_3OabCdEfGhIjKlMn0000",
+      "start_time": "2026-05-02T17:10:00.000Z",
+      "station_start": "STATION002",
+      "end_time": null,
+      "station_end": null
+    }
+  ],
+  "count": 2
+}
+```
+
+---
+
 ## Rents
 
-### 24. Fetch rent data for a station within a date range
+### 27. Fetch rent data for a station within a date range
 
 Date range format: `YYYY-MM-DD_YYYY-MM-DD` (e.g., `2026-01-01_2026-01-31`)
 
@@ -746,7 +917,7 @@ curl -X GET https://api.cuub.tech/rents/STATION001/2026-01-01_2026-01-31
 
 ## Token
 
-### 25. Retrieve Energo API token
+### 28. Retrieve Energo API token
 
 Performs login to Energo backend (with captcha solving via OpenAI), saves the token to the database, and returns it.
 
@@ -772,7 +943,7 @@ curl -X GET https://api.cuub.tech/token
 
 ## Stripe
 
-### 26. List charges
+### 29. List charges
 
 Returns all Stripe charges in a date range (`stripe.charges.list`, paginated until done). Requires `STRIPE_SECRET_KEY` and **from** and **to** query params.
 
@@ -797,7 +968,7 @@ curl "https://api.cuub.tech/stripe/charges?from=2025-02-01&to=2025-02-08"
 }
 ```
 
-### 27. List balance transactions
+### 30. List balance transactions
 
 Returns all Stripe balance transactions in a date range (`stripe.balanceTransactions.list`, paginated until done). Requires `STRIPE_SECRET_KEY` and **from** and **to** query params.
 
@@ -822,7 +993,7 @@ curl "https://api.cuub.tech/stripe/balance-transactions?from=2025-02-01&to=2025-
 }
 ```
 
-### 28. Rents by date range
+### 31. Rents by date range
 
 Returns per-day rent count and net sum from Stripe **balance transactions** for the given date range. Path uses `YYYY-MM-DD_YYYY-MM-DD` (e.g. `2025-02-01_2025-02-08`). Filtered by `REVENUE_TYPES`. Includes previous-month comparison (`ppositive`, `pnegative`, `prents`, `pmoney`). All dates America/Chicago.
 
@@ -855,7 +1026,7 @@ curl -X GET https://api.cuub.tech/rents/2025-02-01_2025-02-08
 }
 ```
 
-### 29. Rents by date range (all stations)
+### 32. Rents by date range (all stations)
 
 Returns net revenue per station for the given date range. Fetches charges in range, groups by `charge.customer` (Stripe ID), maps to `stations` for id/title; **money** = positive − negative. Only stations with at least one charge in the period and existing in DB.
 
@@ -884,7 +1055,7 @@ curl -X GET https://api.cuub.tech/rents/2025-02-01_2025-02-08/all
 }
 ```
 
-### 30. Rents recent (limit only)
+### 33. Rents recent (limit only)
 
 Aggregated rents for the most recent N balance transactions, with no date filter. Days in `data` are those that appear in the last N transactions.
 
