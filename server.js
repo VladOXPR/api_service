@@ -54,12 +54,13 @@ try {
 
 // Load token routes with error handling
 let tokenRoutes;
+let tokenExtractModule;
 try {
-  const tokenExtract = require('./token_extract');
-  if (!tokenExtract || !tokenExtract.router) {
+  tokenExtractModule = require('./token_extract');
+  if (!tokenExtractModule || !tokenExtractModule.router) {
     throw new Error('token_extract module did not export router');
   }
-  tokenRoutes = tokenExtract.router;
+  tokenRoutes = tokenExtractModule.router;
   console.log('✅ Token service API routes loaded successfully');
 } catch (error) {
   console.error('❌ Error loading token service API routes:', error);
@@ -215,7 +216,7 @@ if (process.env.NODE_ENV !== 'production') {
 try {
     const server = app.listen(PORT, '0.0.0.0', () => {
         console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
-        console.log(`📡 GET endpoint available at: http://0.0.0.0:${PORT}/token`);
+        console.log(`📡 GET /token and GET /token/health available at port ${PORT}`);
         console.log(`❤️  Health check available at: http://0.0.0.0:${PORT}/health`);
         console.log(`📖 API docs available at: http://0.0.0.0:${PORT}/docs`);
         console.log(`✅ Server is ready to accept connections`);
@@ -258,63 +259,110 @@ if (typeof globalThis.fetch === 'undefined') {
   fetch = globalThis.fetch;
 }
 
+const TOKEN_HEALTH_CHECK_INTERVAL_MS = parseInt(
+  process.env.TOKEN_HEALTH_CHECK_INTERVAL_MS || String(15 * 60 * 1000),
+  10
+);
+const TOKEN_BACKUP_REFRESH_HOURS = parseInt(process.env.TOKEN_BACKUP_REFRESH_HOURS || '24', 10);
+const isExtractionInProgress = tokenExtractModule && tokenExtractModule.isExtractionInProgress;
+
+let lastBackupRefreshAt = Date.now();
+
+function getInternalBaseUrl() {
+  const port = process.env.PORT || 8080;
+  return process.env.TOKEN_REFRESH_INTERNAL_BASE_URL || `http://127.0.0.1:${port}`;
+}
+
 /**
- * Call the token endpoint to refresh the token
+ * Check stored token health via internal /token/health endpoint.
  */
-async function refreshTokenAutomatically() {
+async function checkTokenHealth() {
+  const url = `${getInternalBaseUrl()}/token/health`;
+  const response = await fetch(url, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`Token health check failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Refresh token when health requires it, or on periodic backup interval.
+ */
+async function maybeRefreshToken() {
   try {
-    console.log('🔄 Automatic token refresh triggered...');
-    const response = await fetch('https://api.cuub.tech/token', {
-      method: 'GET'
-    });
+    if (isExtractionInProgress && isExtractionInProgress()) {
+      console.log('Token extraction already in progress, skipping scheduled refresh');
+      return false;
+    }
+
+    let health;
+    try {
+      health = await checkTokenHealth();
+    } catch (healthErr) {
+      console.error('⚠️ Token health check failed, attempting refresh:', healthErr.message);
+      health = { tokenNeedsAttention: true, tokenPresent: false };
+    }
+
+    const needsRefresh = health.tokenNeedsAttention === true || health.tokenPresent === false;
+    const backupDue =
+      Date.now() - lastBackupRefreshAt >= TOKEN_BACKUP_REFRESH_HOURS * 60 * 60 * 1000;
+
+    if (!needsRefresh && !backupDue) {
+      console.log('✅ Token health OK; skipping Puppeteer refresh');
+      return true;
+    }
+
+    if (backupDue && !needsRefresh) {
+      console.log('🔄 Backup token refresh due (TOKEN_BACKUP_REFRESH_HOURS)');
+    } else {
+      console.log('🔄 Token needs attention; running Puppeteer refresh...');
+    }
+
+    const refreshUrl = `${getInternalBaseUrl()}/token`;
+    const response = await fetch(refreshUrl, { method: 'GET' });
 
     if (!response.ok) {
       console.error(`⚠️ Automatic token refresh failed: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => '');
+      if (body) console.error('Refresh response body:', body.slice(0, 500));
       return false;
     }
 
     const data = await response.json();
     if (data.success && data.token) {
       console.log('✅ Automatic token refresh successful');
+      lastBackupRefreshAt = Date.now();
       return true;
-        }
-        
+    }
+
     console.error('⚠️ Automatic token refresh response missing token:', data);
     return false;
-    } catch (error) {
+  } catch (error) {
     console.error('❌ Error during automatic token refresh:', error.message);
     return false;
   }
 }
 
 /**
- * Schedule the next automatic token refresh
- * Uses random interval between 15 minutes and 30 minutes
+ * Schedule the next token health check / conditional refresh.
  */
 function scheduleNextTokenRefresh() {
-  // Random interval between 15 minutes (900,000 ms) and 30 minutes (1,800,000 ms)
-  const minInterval = 15 * 60 * 1000; // 15 minutes in milliseconds
-  const maxInterval = 30 * 60 * 1000; // 30 minutes in milliseconds
-  const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
-  
-  const hours = Math.floor(randomInterval / (60 * 60 * 1000));
-  const minutes = Math.floor((randomInterval % (60 * 60 * 1000)) / (60 * 1000));
-  
-  console.log(`⏰ Next automatic token refresh scheduled in ${hours}h ${minutes}m (${Math.round(randomInterval / 1000 / 60)} minutes)`);
-  
+  const minutes = Math.round(TOKEN_HEALTH_CHECK_INTERVAL_MS / 1000 / 60);
+  console.log(`⏰ Next token health check scheduled in ${minutes} minutes`);
+
   setTimeout(async () => {
-    await refreshTokenAutomatically();
-    scheduleNextTokenRefresh(); // Schedule the next one
-  }, randomInterval);
+    await maybeRefreshToken();
+    scheduleNextTokenRefresh();
+  }, TOKEN_HEALTH_CHECK_INTERVAL_MS);
 }
 
 // Start the automatic token refresh scheduler
-// Wait a bit after server starts before the first refresh
+// Wait a bit after server starts before the first check
 setTimeout(() => {
-  console.log('🚀 Starting automatic token refresh scheduler...');
-  refreshTokenAutomatically().then(() => {
+  console.log('🚀 Starting token health scheduler (health-driven refresh)...');
+  maybeRefreshToken().then(() => {
     scheduleNextTokenRefresh();
-    });
+  });
 }, 60000); // Wait 1 minute after server starts
 
 module.exports = app;

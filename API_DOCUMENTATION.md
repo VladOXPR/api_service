@@ -919,7 +919,7 @@ curl -X GET https://api.cuub.tech/rents/STATION001/2026-01-01_2026-01-31
 
 ### 28. Retrieve Energo API token
 
-Performs login to Energo backend (with captcha solving via OpenAI), saves the token to the database, and returns it.
+Performs login to Energo backend (Puppeteer + OpenAI captcha), **probes the captured token against Energo**, saves it to the database, and returns it. Concurrent callers share a **single-flight** extraction (one browser at a time).
 
 ```bash
 curl -X GET https://api.cuub.tech/token
@@ -934,10 +934,124 @@ curl -X GET https://api.cuub.tech/token
 }
 ```
 
-**Error responses**
+**Error responses (JSON body includes `stage` and `retriable`)**
 
-- 401: Login failed (invalid credentials)
-- 500: Missing env vars (`ENERGO_USERNAME`, `ENERGO_PASSWORD`, `OPENAI_API_KEY`) or token capture failure
+| HTTP | stage | Meaning |
+|------|-------|---------|
+| 500 | `missing_env` | `ENERGO_USERNAME`, `ENERGO_PASSWORD`, or `OPENAI_API_KEY` not set |
+| 401 | `login_rejected` | Invalid credentials or captcha rejected by Energo |
+| 500 | `captcha_failed` | OpenAI captcha solve failed (retriable) |
+| 500 | `token_not_captured` | Login succeeded but no bearer token intercepted (retriable) |
+| 500 | `token_probe_failed` | Token captured but Energo cabinet probe failed (retriable) |
+| 500 | `browser_launch_failed` | Puppeteer/Chromium failed to start (retriable) |
+| 500 | `db_save_failed` | Token valid but PostgreSQL write failed (retriable) |
+
+Example failure:
+
+```json
+{
+  "success": false,
+  "stage": "token_not_captured",
+  "error": "Token was not captured after login",
+  "retriable": true
+}
+```
+
+**Optional environment (extraction)**
+
+- `TOKEN_CAPTURE_TIMEOUT_MS` — wait for bearer capture after login (default `30000`)
+- `CAPTCHA_MAX_ATTEMPTS` — captcha retries per login (default `3`)
+- `LOGIN_MAX_ATTEMPTS` — full Puppeteer login retries (default `2`)
+- `TOKEN_HEALTH_PROBE_STATION_ID` — station id used to validate token before save
+- `TOKEN_EXTRACT_DEBUG=1` — save failure screenshots to `/tmp` (debug only)
+
+**Automatic refresh (server scheduler)**
+
+The server checks `GET /token/health` every `TOKEN_HEALTH_CHECK_INTERVAL_MS` (default 15 minutes). Puppeteer runs **only when** `tokenNeedsAttention` is true or no token is present, plus a **backup refresh** every `TOKEN_BACKUP_REFRESH_HOURS` (default 24). Refresh uses internal `http://127.0.0.1:$PORT/token` (override with `TOKEN_REFRESH_INTERNAL_BASE_URL`).
+
+**Cloud Run recommendations (token extraction)**
+
+| Setting | Recommended |
+|---------|-------------|
+| Request timeout | 300s |
+| Memory | 2 GiB minimum (4 GiB if OOM persists) |
+| CPU | 2 vCPU |
+| Concurrency | 1 (or low) if Puppeteer shares the service |
+| Min instances | 1 if cold starts cause refresh failures |
+
+Ensure `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` and Dockerfile Chromium packages are deployed.
+
+### 25b. Check stored token health (monitoring)
+
+Read-only: loads the bearer token from the database and calls Energo’s cabinet API once (same request shape as slot/battery enrichment). **Does not** run Puppeteer or refresh the token.
+
+Use this from the maintenance service (or cron) to detect expired tokens before slot data goes stale. If `tokenNeedsAttention` is true, operators should open `tokenRefreshUrl` (or call `GET /token`) to re-extract a token.
+
+**Optional environment**
+
+- `TOKEN_HEALTH_PROBE_STATION_ID` — cabinet / station id to call. If unset, the newest row from `stations` is used (`ORDER BY updated_at DESC LIMIT 1`).
+- `TOKEN_REFRESH_URL` — defaults to `https://api.cuub.tech/token`; included in JSON for alerts/links (operators).
+- `TOKEN_HEALTH_CHECK_INTERVAL_MS` — scheduler health poll interval (default 15 minutes).
+- `TOKEN_BACKUP_REFRESH_HOURS` — force Puppeteer refresh even when health is OK (default 24).
+
+```bash
+curl -s https://api.cuub.tech/token/health | jq .
+```
+
+**Example success (token accepted)**
+
+```json
+{
+  "success": true,
+  "checkedAt": "2026-04-23T12:00:00.000Z",
+  "tokenRefreshUrl": "https://api.cuub.tech/token",
+  "tokenPresent": true,
+  "tokenValid": true,
+  "tokenNeedsAttention": false,
+  "energoApiReachable": true,
+  "httpStatus": 200,
+  "probedWithStationId": "YOUR_STATION_ID"
+}
+```
+
+**Example: token rejected (refresh needed)**
+
+```json
+{
+  "success": true,
+  "checkedAt": "2026-04-23T12:00:00.000Z",
+  "tokenRefreshUrl": "https://api.cuub.tech/token",
+  "tokenPresent": true,
+  "tokenValid": false,
+  "tokenNeedsAttention": true,
+  "energoApiReachable": true,
+  "httpStatus": 401,
+  "probedWithStationId": "YOUR_STATION_ID",
+  "message": "Energo rejected the bearer token (unauthorized). Refresh with GET /token."
+}
+```
+
+**Example: no token in DB**
+
+```json
+{
+  "success": true,
+  "checkedAt": "2026-04-23T12:00:00.000Z",
+  "tokenRefreshUrl": "https://api.cuub.tech/token",
+  "tokenPresent": false,
+  "tokenValid": false,
+  "tokenNeedsAttention": true,
+  "energoApiReachable": null,
+  "httpStatus": null,
+  "probedWithStationId": null,
+  "message": "No token in database. Call GET /token to log in and store a token."
+}
+```
+
+**HTTP status from this endpoint**
+
+- **200** — Health payload returned (check `success`, `tokenNeedsAttention`, and `tokenValid` in the body).
+- **503** — Database / pool failure reading token or stations.
 
 ---
 

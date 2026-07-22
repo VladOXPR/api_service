@@ -46,6 +46,14 @@ if (typeof globalThis.fetch === 'undefined') {
 // Set to false to see the browser window, true to run in headless mode (no browser window)
 const SHOW_BROWSER_PREVIEW = true;
 
+const TOKEN_CAPTURE_TIMEOUT_MS = parseInt(process.env.TOKEN_CAPTURE_TIMEOUT_MS || '30000', 10);
+const CAPTCHA_MAX_ATTEMPTS = parseInt(process.env.CAPTCHA_MAX_ATTEMPTS || '3', 10);
+const LOGIN_MAX_ATTEMPTS = parseInt(process.env.LOGIN_MAX_ATTEMPTS || '2', 10);
+const TOKEN_EXTRACT_DEBUG = process.env.TOKEN_EXTRACT_DEBUG === '1';
+
+/** Single-flight promise: concurrent GET /token calls share one Puppeteer run. */
+let extractionFlight = null;
+
 /**
  * Helper function to wait/sleep (replacement for deprecated page.waitForTimeout)
  * @param {number} milliseconds - Time to wait in milliseconds
@@ -53,6 +61,108 @@ const SHOW_BROWSER_PREVIEW = true;
  */
 function delay(milliseconds) {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function redactToken(token) {
+    if (!token || typeof token !== 'string') return '(none)';
+    return token.length <= 12 ? `${token.slice(0, 4)}...` : `${token.slice(0, 12)}...`;
+}
+
+function logExtractionMetric(fields) {
+    console.log(JSON.stringify({ event: 'token_extraction', ...fields }));
+}
+
+function extractionFailure(stage, error, { retriable = true, httpStatus = 500, extra = {} } = {}) {
+    return {
+        success: false,
+        stage,
+        error: error || stage,
+        retriable,
+        httpStatus,
+        ...extra,
+    };
+}
+
+function isExtractionInProgress() {
+    return extractionFlight !== null;
+}
+
+function extractBearerFromHeaders(headers) {
+    if (!headers) return null;
+    const authHeader = headers['authorization'] || headers['Authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        return authHeader.replace('Bearer ', '').trim();
+    }
+    return null;
+}
+
+/**
+ * Attach request/response listeners to capture Bearer tokens from any Energo /api/ call.
+ */
+function setupBearerCapture(page) {
+    let capturedToken = null;
+    let captureSource = null;
+    let tokenPromiseResolve = null;
+    const tokenPromise = new Promise((resolve) => {
+        tokenPromiseResolve = resolve;
+    });
+
+    const tryCapture = (token, source) => {
+        if (token && !capturedToken) {
+            capturedToken = token;
+            captureSource = source;
+            console.log(`Authorization token captured (${source}): ${redactToken(token)}`);
+            if (tokenPromiseResolve) {
+                tokenPromiseResolve(capturedToken);
+                tokenPromiseResolve = null;
+            }
+        }
+    };
+
+    page.on('request', (request) => {
+        const url = request.url();
+        if (url.includes('/api/')) {
+            const token = extractBearerFromHeaders(request.headers());
+            if (token) tryCapture(token, 'request');
+        }
+    });
+
+    page.on('response', (response) => {
+        try {
+            const url = response.url();
+            if (url.includes('/api/')) {
+                const token = extractBearerFromHeaders(response.request().headers());
+                if (token) tryCapture(token, 'response');
+            }
+        } catch (_) {
+            // ignore response header read errors
+        }
+    });
+
+    return {
+        getToken: () => capturedToken,
+        getCaptureSource: () => captureSource,
+        waitForToken: async (timeoutMs) => {
+            if (capturedToken) return capturedToken;
+            await Promise.race([
+                tokenPromise.then(() => capturedToken),
+                delay(timeoutMs).then(() => null),
+            ]);
+            return capturedToken;
+        },
+    };
+}
+
+async function saveDebugArtifacts(page, stage) {
+    if (!TOKEN_EXTRACT_DEBUG || !page) return;
+    try {
+        const stamp = Date.now();
+        const screenshotPath = `/tmp/token-extract-${stage}-${stamp}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(`Debug screenshot saved: ${screenshotPath}`);
+    } catch (err) {
+        console.warn('Could not save debug screenshot:', err.message);
+    }
 }
 
 /**
@@ -306,30 +416,7 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
         // Set viewport
         await page.setViewport({ width: 1280, height: 720 });
         
-        // Set up network monitoring to capture authorization token
-        let capturedToken = null;
-        let tokenPromiseResolve = null;
-        const tokenPromise = new Promise((resolve) => {
-            tokenPromiseResolve = resolve;
-        });
-        
-        page.on('request', (request) => {
-            const url = request.url();
-            // Check if this is the cabinet API endpoint
-            if (url.includes('/api/cabinet') && url.includes('sort=isOnline')) {
-                const headers = request.headers();
-                const authHeader = headers['authorization'] || headers['Authorization'];
-                if (authHeader && authHeader.startsWith('Bearer ')) {
-                    capturedToken = authHeader.replace('Bearer ', '');
-                    console.log('\n=== AUTHORIZATION TOKEN CAPTURED ===');
-                    console.log('Token:', capturedToken);
-                    console.log('=====================================\n');
-                    if (tokenPromiseResolve) {
-                        tokenPromiseResolve(capturedToken);
-                    }
-                }
-            }
-        });
+        const capture = setupBearerCapture(page);
         
         // Navigate to login page
         console.log('Navigating to login page...');
@@ -338,38 +425,150 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
             timeout: timeout
         });
 
+        let loginSubmitResult = null;
+        for (let captchaAttempt = 1; captchaAttempt <= CAPTCHA_MAX_ATTEMPTS; captchaAttempt++) {
+            if (captchaAttempt > 1) {
+                console.log(`Retrying login with fresh captcha (attempt ${captchaAttempt}/${CAPTCHA_MAX_ATTEMPTS})...`);
+                await page.goto('https://backend.energo.vip/login', {
+                    waitUntil: 'networkidle2',
+                    timeout: timeout
+                });
+                await delay(2000);
+            }
+
+            loginSubmitResult = await fillAndSubmitLoginForm(page, {
+                username,
+                password,
+                captcha,
+                openaiApiKey,
+                headless,
+                timeout,
+            });
+
+            if (loginSubmitResult.ok) {
+                break;
+            }
+
+            if (loginSubmitResult.stage === 'login_rejected') {
+                break;
+            }
+        }
+
+        if (!loginSubmitResult || !loginSubmitResult.ok) {
+            await saveDebugArtifacts(page, loginSubmitResult?.stage || 'login_failed');
+            return {
+                success: false,
+                stage: loginSubmitResult?.stage || 'captcha_failed',
+                error: loginSubmitResult?.error || 'Login failed after captcha attempts',
+                retriable: loginSubmitResult?.stage !== 'login_rejected',
+                cookies: [],
+                url: page.url(),
+                title: await page.title().catch(() => ''),
+                token: null,
+                captureSource: null,
+                browser,
+                page,
+            };
+        }
+
+        // Force dashboard API traffic if token not captured yet
+        if (!capture.getToken()) {
+            console.log('Navigating to device list to trigger Energo API calls...');
+            try {
+                await page.goto('https://backend.energo.vip/device/list', {
+                    waitUntil: 'networkidle2',
+                    timeout: timeout
+                });
+            } catch (navErr) {
+                console.warn('Device list navigation warning:', navErr.message);
+            }
+        }
+
+        if (!capture.getToken()) {
+            console.log(`Waiting up to ${TOKEN_CAPTURE_TIMEOUT_MS}ms for bearer token capture...`);
+            await capture.waitForToken(TOKEN_CAPTURE_TIMEOUT_MS);
+        }
+
+        let cookies = [];
+        let currentUrl = '';
+        let pageTitle = '';
+        try {
+            cookies = await page.cookies();
+            currentUrl = page.url();
+            pageTitle = await page.title();
+        } catch (e) {
+            const isSessionClosed = e.name === 'TargetCloseError' ||
+                (e.message && (e.message.includes('Session closed') || e.message.includes('Protocol error')));
+            if (isSessionClosed) {
+                console.log('Page session closed before reading cookies/url/title (common on Cloud Run). Token may still be captured.');
+            } else {
+                throw e;
+            }
+        }
+
+        const capturedToken = capture.getToken();
+        if (!capturedToken) {
+            await saveDebugArtifacts(page, 'token_not_captured');
+        }
+
+        return {
+            success: !!capturedToken,
+            stage: capturedToken ? null : 'token_not_captured',
+            cookies,
+            url: currentUrl,
+            title: pageTitle,
+            token: capturedToken,
+            captureSource: capture.getCaptureSource(),
+            browser,
+            page,
+        };
+
+    } catch (error) {
+        console.error('Login error:', error);
+        if (browser) {
+            await browser.close();
+        }
+        const msg = error.message || String(error);
+        const stage = msg.includes('ETXTBSY') || msg.includes('spawn') || msg.includes('Browser')
+            ? 'browser_launch_failed'
+            : 'browser_launch_failed';
+        const wrapped = new Error(msg);
+        wrapped.stage = stage;
+        wrapped.retriable = true;
+        throw wrapped;
+    }
+}
+
+/**
+ * Fill login form, solve captcha, submit — one attempt on the current page.
+ */
+async function fillAndSubmitLoginForm(page, { username, password, captcha, openaiApiKey, headless, timeout }) {
         // Wait for the login form to be visible
         await page.waitForSelector('input[type="text"], input[type="email"], input[name*="username"], input[name*="user"], input[id*="username"], input[id*="user"]', { timeout: timeout });
         
-        // Wait a bit more for captcha image to load (it might load dynamically)
         console.log('Waiting for page to fully load (including captcha image)...');
         await delay(2000);
         
-        // Find and fill username field
         console.log('Filling username...');
         const usernameField = await page.$('input[type="text"], input[type="email"], input[name*="username"], input[name*="user"], input[id*="username"], input[id*="user"], input[placeholder*="username" i], input[placeholder*="user" i]');
         if (usernameField) {
-            await usernameField.click({ clickCount: 3 }); // Select all if there's existing text
+            await usernameField.click({ clickCount: 3 });
             await usernameField.type(username, { delay: 50 });
         } else {
             throw new Error('Username field not found');
         }
 
-        // Find and fill password field
         console.log('Filling password...');
         const passwordField = await page.$('input[type="password"], input[name*="password"], input[name*="pass"], input[id*="password"], input[id*="pass"]');
         if (passwordField) {
-            await passwordField.click({ clickCount: 3 }); // Select all if there's existing text
+            await passwordField.click({ clickCount: 3 });
             await passwordField.type(password, { delay: 50 });
         } else {
             throw new Error('Password field not found');
         }
 
-        // Handle captcha
         console.log('Handling captcha...');
         let captchaField = null;
-        
-        // Try to find captcha input field with various selectors
         const captchaSelectors = [
             'input[name*="captcha" i]',
             'input[id*="captcha" i]',
@@ -392,26 +591,31 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
             let captchaCode = captcha;
             
             if (!captchaCode) {
-                // Try to solve captcha using OpenAI
                 try {
                     const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
-                    if (apiKey) {
-                        console.log('Extracting captcha image...');
-                        const captchaImage = await extractCaptchaImage(page);
-                        
-                        console.log('Solving captcha with OpenAI...');
-                        captchaCode = await solveCaptchaWithOpenAI(captchaImage, apiKey);
-                    } else {
-                        throw new Error('OpenAI API key not provided. Set OPENAI_API_KEY environment variable or pass openaiApiKey parameter.');
+                    if (!apiKey) {
+                        return {
+                            ok: false,
+                            stage: 'missing_env',
+                            error: 'OpenAI API key not provided. Set OPENAI_API_KEY environment variable.',
+                            retriable: false,
+                        };
                     }
+                    console.log('Extracting captcha image...');
+                    const captchaImage = await extractCaptchaImage(page);
+                    console.log('Solving captcha with OpenAI...');
+                    captchaCode = await solveCaptchaWithOpenAI(captchaImage, apiKey);
                 } catch (error) {
                     console.error('Failed to solve captcha automatically:', error.message);
-                    console.error('Error stack:', error.stack);
-                    // Fallback: wait for manual captcha input
+                    if (headless) {
+                        return {
+                            ok: false,
+                            stage: 'captcha_failed',
+                            error: error.message || 'Captcha solving failed',
+                            retriable: true,
+                        };
+                    }
                     console.log('Waiting for manual captcha input...');
-                    console.log('Please enter the captcha code in the browser window');
-                    
-                    // Wait for the captcha field to have some value
                     try {
                         await page.waitForFunction(
                             () => {
@@ -432,10 +636,8 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
                                 }
                                 return false;
                             },
-                            { timeout: 120000 } // Wait up to 2 minutes for manual input
+                            { timeout: 120000 }
                         );
-                        
-                        // Get the entered captcha code
                         captchaCode = await page.evaluate(() => {
                             const selectors = [
                                 'input[name*="captcha" i]',
@@ -454,16 +656,18 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
                             }
                             return null;
                         });
-                        
-                        console.log('Captcha code detected from manual input');
                     } catch (waitError) {
-                        throw new Error('Manual captcha input timeout or failed. Original error: ' + error.message);
+                        return {
+                            ok: false,
+                            stage: 'captcha_failed',
+                            error: 'Manual captcha input timeout or failed. Original error: ' + error.message,
+                            retriable: true,
+                        };
                     }
                 }
             }
             
             if (captchaCode) {
-                // Fill in the captcha code
                 await captchaField.click({ clickCount: 3 });
                 await captchaField.type(captchaCode, { delay: 50 });
                 console.log('Captcha code entered');
@@ -472,10 +676,8 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
             console.log('Captcha field not found, proceeding without captcha input');
         }
 
-        // Wait a bit for any animations or validations
         await delay(500);
 
-        // Find and click submit button
         console.log('Submitting form...');
         const submitSelectors = [
             'button[type="submit"]',
@@ -483,7 +685,7 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
             'button:has-text("Login")',
             'button:has-text("Sign in")',
             'button:has-text("Log in")',
-            'button:has-text("Вход")', // Russian for "Login"
+            'button:has-text("Вход")',
             '[onclick*="login" i]',
             '[onclick*="submit" i]'
         ];
@@ -501,7 +703,6 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
         }
 
         if (!submitButton) {
-            // Try to find any button and click it, or press Enter
             const buttons = await page.$$('button');
             if (buttons.length > 0) {
                 submitButton = buttons[0];
@@ -511,20 +712,16 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
         if (submitButton) {
             await submitButton.click();
         } else {
-            // If no submit button found, try pressing Enter on the password field
             await passwordField.press('Enter');
         }
 
-        // Wait for navigation or error message
         console.log('Waiting for login to complete...');
         try {
             await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
         } catch (e) {
-            // Navigation might not occur, or it might be a single-page app
             console.log('No navigation detected, checking for error messages...');
         }
 
-        // Check if login was successful by looking for error messages or dashboard elements
         const errorSelectors = [
             '.error',
             '.alert-danger',
@@ -532,8 +729,8 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
             '[id*="error" i]',
             'div:has-text("Invalid")',
             'div:has-text("incorrect")',
-            'div:has-text("неверный" i)', // Russian for "incorrect"
-            'div:has-text("ошибка" i)' // Russian for "error"
+            'div:has-text("неверный" i)',
+            'div:has-text("ошибка" i)'
         ];
 
         let hasError = false;
@@ -549,64 +746,40 @@ async function loginToEnergo({ username, password, captcha, openaiApiKey, headle
                     }
                 }
             } catch (e) {
-                // Page may be closed (e.g. on Cloud Run); skip error check
                 const isSessionClosed = e.name === 'TargetCloseError' ||
                     (e.message && (e.message.includes('Session closed') || e.message.includes('Protocol error')));
                 if (isSessionClosed) {
-                    console.log('Page session closed during error check, continuing...');
                     break;
                 }
             }
         }
 
-        // Get cookies and session info (optional - session may be closed on some environments e.g. Cloud Run)
-        let cookies = [];
         let currentUrl = '';
-        let pageTitle = '';
         try {
-            cookies = await page.cookies();
             currentUrl = page.url();
-            pageTitle = await page.title();
-        } catch (e) {
-            const isSessionClosed = e.name === 'TargetCloseError' ||
-                (e.message && (e.message.includes('Session closed') || e.message.includes('Protocol error')));
-            if (isSessionClosed) {
-                console.log('Page session closed before reading cookies/url/title (common on Cloud Run). Token may still be captured.');
-            } else {
-                throw e;
-            }
+        } catch (_) {
+            currentUrl = '';
         }
 
-        // Wait for the cabinet API request to be made (if it hasn't been captured yet)
-        if (!capturedToken) {
-            console.log('Waiting for cabinet API request to capture token...');
-            try {
-                await Promise.race([
-                    tokenPromise.then(() => true),
-                    delay(10000).then(() => false) // Wait up to 10 seconds for the request
-                ]);
-            } catch (e) {
-                console.log('Error waiting for token capture:', e.message);
-            }
+        if (hasError) {
+            return {
+                ok: false,
+                stage: 'login_rejected',
+                error: 'Login rejected by Energo (invalid credentials or captcha)',
+                retriable: false,
+            };
         }
 
-        return {
-            success: !hasError && currentUrl !== 'https://backend.energo.vip/login',
-            cookies: cookies,
-            url: currentUrl,
-            title: pageTitle,
-            token: capturedToken,
-            browser: browser,
-            page: page
-        };
-
-    } catch (error) {
-        console.error('Login error:', error);
-        if (browser) {
-            await browser.close();
+        if (currentUrl === 'https://backend.energo.vip/login') {
+            return {
+                ok: false,
+                stage: 'captcha_failed',
+                error: 'Still on login page after submit (likely captcha failure)',
+                retriable: true,
+            };
         }
-        throw error;
-    }
+
+        return { ok: true };
 }
 
 /**
@@ -617,6 +790,251 @@ async function closeBrowser(result) {
     if (result && result.browser) {
         await result.browser.close();
         console.log('Browser closed');
+    }
+}
+
+/**
+ * Resolve station id for Energo cabinet probe (env or latest stations row).
+ */
+async function resolveProbeStationId(dbClient) {
+    let stationId = process.env.TOKEN_HEALTH_PROBE_STATION_ID
+        ? String(process.env.TOKEN_HEALTH_PROBE_STATION_ID).trim()
+        : '';
+    if (!stationId && dbClient) {
+        const stRes = await dbClient.query(
+            'SELECT id::text AS id FROM stations ORDER BY updated_at DESC NULLS LAST LIMIT 1',
+        );
+        if (stRes.rows.length > 0 && stRes.rows[0].id) {
+            stationId = String(stRes.rows[0].id).trim();
+        }
+    }
+    return stationId || null;
+}
+
+/**
+ * Probe Energo with captured token; require 2xx before persisting.
+ */
+async function validateCapturedToken(token, dbClient) {
+    const stationId = await resolveProbeStationId(dbClient);
+    if (!stationId) {
+        return {
+            valid: false,
+            httpStatus: null,
+            probedWithStationId: null,
+            error: 'No station id available for token probe. Set TOKEN_HEALTH_PROBE_STATION_ID or add stations rows.',
+        };
+    }
+    try {
+        const response = await fetchEnergoCabinetProbe(token, stationId);
+        const ok = response.status >= 200 && response.status < 300;
+        return {
+            valid: ok,
+            httpStatus: response.status,
+            probedWithStationId: stationId,
+            error: ok ? null : `Energo probe returned HTTP ${response.status}`,
+        };
+    } catch (err) {
+        return {
+            valid: false,
+            httpStatus: null,
+            probedWithStationId: stationId,
+            error: err.message || String(err),
+        };
+    }
+}
+
+async function saveTokenToDatabase(token) {
+    if (!tokenPool) {
+        console.warn('⚠️ Token pool not available, skipping database save');
+        return { saved: false, error: 'Token database pool is not available.' };
+    }
+    let dbClient;
+    try {
+        dbClient = await tokenPool.connect();
+        await dbClient.query('DELETE FROM token');
+        await dbClient.query('INSERT INTO token (value) VALUES ($1)', [token]);
+        console.log('✅ Token saved to database successfully');
+        return { saved: true };
+    } catch (dbError) {
+        console.error('❌ Error saving token to database:', dbError);
+        return { saved: false, error: dbError.message || String(dbError) };
+    } finally {
+        if (dbClient) {
+            dbClient.release();
+        }
+    }
+}
+
+/**
+ * Run loginToEnergo with retries on retriable failures.
+ */
+async function extractTokenWithRetries({ username, password, openaiApiKey }) {
+    const backoffs = [5000, 15000];
+    let lastFailure = extractionFailure('token_not_captured', 'Extraction failed');
+
+    for (let attempt = 1; attempt <= LOGIN_MAX_ATTEMPTS; attempt++) {
+        const startedAt = Date.now();
+        let loginResult = null;
+        try {
+            loginResult = await loginToEnergo({
+                username,
+                password,
+                captcha: undefined,
+                openaiApiKey,
+                headless: true,
+                timeout: 30000,
+            });
+
+            if (!loginResult.token) {
+                lastFailure = extractionFailure(
+                    loginResult.stage || 'token_not_captured',
+                    loginResult.error || 'Token was not captured after login',
+                    { retriable: loginResult.retriable !== false, httpStatus: 500, extra: { url: loginResult.url } },
+                );
+                logExtractionMetric({
+                    attempt,
+                    stage: lastFailure.stage,
+                    durationMs: Date.now() - startedAt,
+                    captureSource: loginResult.captureSource || null,
+                    success: false,
+                });
+            } else {
+                let dbClient;
+                try {
+                    if (tokenPool) {
+                        dbClient = await tokenPool.connect();
+                    }
+                    const probe = await validateCapturedToken(loginResult.token, dbClient);
+                    if (!probe.valid) {
+                        lastFailure = extractionFailure(
+                            'token_probe_failed',
+                            probe.error || 'Captured token failed Energo probe',
+                            {
+                                retriable: true,
+                                httpStatus: 500,
+                                extra: {
+                                    probeHttpStatus: probe.httpStatus,
+                                    probedWithStationId: probe.probedWithStationId,
+                                },
+                            },
+                        );
+                        logExtractionMetric({
+                            attempt,
+                            stage: 'token_probe_failed',
+                            durationMs: Date.now() - startedAt,
+                            captureSource: loginResult.captureSource || null,
+                            probeStatus: probe.httpStatus,
+                            success: false,
+                        });
+                    } else {
+                        const saveResult = await saveTokenToDatabase(loginResult.token);
+                        if (!saveResult.saved) {
+                            lastFailure = extractionFailure(
+                                'db_save_failed',
+                                saveResult.error || 'Failed to save token to database',
+                                { retriable: true, httpStatus: 500 },
+                            );
+                            logExtractionMetric({
+                                attempt,
+                                stage: 'db_save_failed',
+                                durationMs: Date.now() - startedAt,
+                                captureSource: loginResult.captureSource || null,
+                                probeStatus: probe.httpStatus,
+                                success: false,
+                            });
+                        } else {
+                        logExtractionMetric({
+                            attempt,
+                            stage: 'success',
+                            durationMs: Date.now() - startedAt,
+                            captureSource: loginResult.captureSource || null,
+                            probeStatus: probe.httpStatus,
+                            success: true,
+                        });
+                        return {
+                            success: true,
+                            token: loginResult.token,
+                            httpStatus: 200,
+                            probedWithStationId: probe.probedWithStationId,
+                            dbSaved: true,
+                        };
+                        }
+                    }
+                } finally {
+                    if (dbClient) {
+                        dbClient.release();
+                    }
+                }
+            }
+        } catch (error) {
+            const stage = error.stage || 'browser_launch_failed';
+            lastFailure = extractionFailure(stage, error.message || String(error), {
+                retriable: error.retriable !== false,
+                httpStatus: 500,
+            });
+            logExtractionMetric({
+                attempt,
+                stage,
+                durationMs: Date.now() - startedAt,
+                success: false,
+            });
+        } finally {
+            if (loginResult) {
+                try {
+                    await closeBrowser(loginResult);
+                } catch (closeError) {
+                    console.error('Error closing browser:', closeError);
+                }
+            }
+        }
+
+        if (attempt < LOGIN_MAX_ATTEMPTS && lastFailure.retriable) {
+            const waitMs = backoffs[attempt - 1] || 15000;
+            console.log(`Token extraction attempt ${attempt} failed (${lastFailure.stage}); retrying in ${waitMs}ms...`);
+            await delay(waitMs);
+        } else {
+            break;
+        }
+    }
+
+    return lastFailure;
+}
+
+/**
+ * Single-flight wrapper: parallel callers await the same extraction run.
+ */
+async function runTokenExtraction() {
+    if (extractionFlight) {
+        return extractionFlight;
+    }
+
+    extractionFlight = (async () => {
+        const username = process.env.ENERGO_USERNAME;
+        const password = process.env.ENERGO_PASSWORD;
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+
+        if (!username || !password) {
+            return extractionFailure(
+                'missing_env',
+                'ENERGO_USERNAME and ENERGO_PASSWORD environment variables are required',
+                { retriable: false, httpStatus: 500 },
+            );
+        }
+        if (!openaiApiKey) {
+            return extractionFailure(
+                'missing_env',
+                'OPENAI_API_KEY environment variable is required',
+                { retriable: false, httpStatus: 500 },
+            );
+        }
+
+        return extractTokenWithRetries({ username, password, openaiApiKey });
+    })();
+
+    try {
+        return await extractionFlight;
+    } finally {
+        extractionFlight = null;
     }
 }
 
@@ -725,113 +1143,208 @@ try {
   tokenPool = null;
 }
 
+/** Public URL for operators to trigger a fresh token (Puppeteer login). */
+const TOKEN_REFRESH_URL = process.env.TOKEN_REFRESH_URL || 'https://api.cuub.tech/token';
+
+/**
+ * Probe Energo Relink with the stored bearer token (same pattern as map_service_api).
+ * @param {string} token
+ * @param {string} stationId
+ * @returns {Promise<Response>}
+ */
+async function fetchEnergoCabinetProbe(token, stationId) {
+  const url = `https://backend.energo.vip/api/cabinet?cabinetId=${encodeURIComponent(stationId)}`;
+  return fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Referer: 'https://backend.energo.vip/device/list',
+      oid: '3526',
+    },
+  });
+}
+
+/**
+ * GET /token/health
+ * Read-only: uses DB token + one cabinet request to infer whether the token still works.
+ * Does not run Puppeteer. Intended for monitoring (e.g. maintenance service → Telegram).
+ */
+router.get('/token/health', async (req, res) => {
+  const checkedAt = new Date().toISOString();
+  const baseFields = {
+    success: true,
+    checkedAt,
+    tokenRefreshUrl: TOKEN_REFRESH_URL,
+  };
+
+  if (!tokenPool) {
+    return res.status(503).json({
+      ...baseFields,
+      success: false,
+      tokenPresent: null,
+      tokenValid: null,
+      tokenNeedsAttention: true,
+      energoApiReachable: null,
+      httpStatus: null,
+      probedWithStationId: null,
+      error: 'Token database pool is not available.',
+    });
+  }
+
+  let client;
+  try {
+    client = await tokenPool.connect();
+    const tokenResult = await client.query('SELECT value FROM token LIMIT 1');
+    const rawToken =
+      tokenResult.rows.length > 0 && tokenResult.rows[0].value != null
+        ? String(tokenResult.rows[0].value).trim()
+        : '';
+
+    if (!rawToken) {
+      return res.json({
+        ...baseFields,
+        tokenPresent: false,
+        tokenValid: false,
+        tokenNeedsAttention: true,
+        energoApiReachable: null,
+        httpStatus: null,
+        probedWithStationId: null,
+        message: 'No token in database. Call GET /token to log in and store a token.',
+      });
+    }
+
+    let stationId = process.env.TOKEN_HEALTH_PROBE_STATION_ID
+      ? String(process.env.TOKEN_HEALTH_PROBE_STATION_ID).trim()
+      : '';
+    if (!stationId) {
+      const stRes = await client.query(
+        'SELECT id::text AS id FROM stations ORDER BY updated_at DESC NULLS LAST LIMIT 1',
+      );
+      if (stRes.rows.length > 0 && stRes.rows[0].id) {
+        stationId = String(stRes.rows[0].id).trim();
+      }
+    }
+
+    if (!stationId) {
+      return res.json({
+        ...baseFields,
+        tokenPresent: true,
+        tokenValid: null,
+        tokenNeedsAttention: false,
+        energoApiReachable: null,
+        httpStatus: null,
+        probedWithStationId: null,
+        message:
+          'Token is present but no station id to probe against. Set TOKEN_HEALTH_PROBE_STATION_ID or add rows to `stations`.',
+      });
+    }
+
+    let energoResponse;
+    try {
+      energoResponse = await fetchEnergoCabinetProbe(rawToken, stationId);
+    } catch (netErr) {
+      const msg = netErr && netErr.message ? netErr.message : String(netErr);
+      return res.json({
+        ...baseFields,
+        tokenPresent: true,
+        tokenValid: null,
+        tokenNeedsAttention: false,
+        energoApiReachable: false,
+        httpStatus: null,
+        probedWithStationId: stationId,
+        message: `Could not reach Energo API: ${msg}`,
+      });
+    }
+
+    const status = energoResponse.status;
+    let tokenValid = null;
+    let message;
+
+    if (status === 401 || status === 403) {
+      tokenValid = false;
+      message = 'Energo rejected the bearer token (unauthorized). Refresh with GET /token.';
+    } else if (status >= 200 && status < 300) {
+      tokenValid = true;
+    } else if (status === 404) {
+      tokenValid = null;
+      message =
+        'Energo returned 404 for this cabinet id (token may still be valid; check TOKEN_HEALTH_PROBE_STATION_ID or station id).';
+    } else {
+      tokenValid = null;
+      message = `Energo returned HTTP ${status}; token validity could not be confirmed from this probe alone.`;
+    }
+
+    const tokenNeedsAttention = tokenValid === false;
+
+    return res.json({
+      ...baseFields,
+      tokenPresent: true,
+      tokenValid,
+      tokenNeedsAttention,
+      energoApiReachable: true,
+      httpStatus: status,
+      probedWithStationId: stationId,
+      ...(message ? { message } : {}),
+    });
+  } catch (err) {
+    console.error('Error in /token/health:', err);
+    return res.status(503).json({
+      success: false,
+      checkedAt,
+      tokenRefreshUrl: TOKEN_REFRESH_URL,
+      tokenPresent: null,
+      tokenValid: null,
+      tokenNeedsAttention: true,
+      energoApiReachable: null,
+      httpStatus: null,
+      probedWithStationId: null,
+      error: err.message || String(err),
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
 /**
  * GET /token
- * Retrieve the Energo API token
- * Returns a JSON response with the token
+ * Retrieve the Energo API token (single-flight Puppeteer extraction).
  */
 router.get('/token', async (req, res) => {
-    let loginResult = null;
-    
     try {
-        // Get credentials from environment variables
-        const username = process.env.ENERGO_USERNAME;
-        const password = process.env.ENERGO_PASSWORD;
-        const openaiApiKey = process.env.OPENAI_API_KEY;
-        
-        // Validate required environment variables
-        if (!username || !password) {
-            return res.status(500).json({
-                success: false,
-                error: 'ENERGO_USERNAME and ENERGO_PASSWORD environment variables are required'
+        const result = await runTokenExtraction();
+
+        if (result.success) {
+            return res.json({
+                success: true,
+                token: result.token,
             });
         }
-        
-        if (!openaiApiKey) {
-            return res.status(500).json({
-                success: false,
-                error: 'OPENAI_API_KEY environment variable is required'
-            });
-        }
-        
-        // Perform login to get the token
-        loginResult = await loginToEnergo({
-            username: username,
-            password: password,
-            captcha: undefined, // Will be solved using OpenAI
-            openaiApiKey: openaiApiKey,
-            headless: true, // Run in headless mode for server
-            timeout: 30000
+
+        const httpStatus = result.httpStatus || (result.stage === 'login_rejected' ? 401 : 500);
+        return res.status(httpStatus).json({
+            success: false,
+            stage: result.stage,
+            error: result.error,
+            retriable: result.retriable !== false,
+            ...(result.url ? { url: result.url } : {}),
+            ...(result.probeHttpStatus != null ? { probeHttpStatus: result.probeHttpStatus } : {}),
+            ...(result.probedWithStationId ? { probedWithStationId: result.probedWithStationId } : {}),
         });
-        
-        // Check if login was successful
-        if (!loginResult.success) {
-            return res.status(401).json({
-                success: false,
-                error: 'Login failed. Please check credentials.',
-                url: loginResult.url,
-                title: loginResult.title
-            });
-        }
-        
-        // Check if token was captured
-        if (!loginResult.token) {
-            return res.status(500).json({
-                success: false,
-                error: 'Token was not captured. The login may have succeeded but the API token was not found.',
-                url: loginResult.url
-            });
-        }
-        
-        // Save token to PostgreSQL database
-        if (tokenPool) {
-            let dbClient;
-            try {
-                dbClient = await tokenPool.connect();
-                // Delete existing tokens and insert the new one
-                // This ensures only one token is stored at a time
-                await dbClient.query('DELETE FROM token');
-                await dbClient.query('INSERT INTO token (value) VALUES ($1)', [loginResult.token]);
-                console.log('✅ Token saved to database successfully');
-            } catch (dbError) {
-                console.error('❌ Error saving token to database:', dbError);
-                // Don't fail the request if database save fails - still return the token
-                // This allows the API to work even if there's a temporary database issue
-            } finally {
-                if (dbClient) {
-                    dbClient.release();
-                }
-            }
-        } else {
-            console.warn('⚠️ Token pool not available, skipping database save');
-        }
-        
-        // Return the token as JSON
-        return res.json({
-            success: true,
-            token: loginResult.token
-        });
-        
     } catch (error) {
         console.error('Error in /token endpoint:', error);
         return res.status(500).json({
             success: false,
-            error: error.message || 'An error occurred while retrieving the token'
+            stage: error.stage || 'unknown',
+            error: error.message || 'An error occurred while retrieving the token',
+            retriable: true,
         });
-    } finally {
-        // Always close the browser to free up resources
-        if (loginResult) {
-            try {
-                await closeBrowser(loginResult);
-            } catch (closeError) {
-                console.error('Error closing browser:', closeError);
-            }
-        }
     }
 });
 
 // Log when router is loaded
-console.log('📦 Token service API router initialized with route: GET /token');
+console.log('📦 Token service API router initialized with routes: GET /token/health, GET /token');
 
 // Export functions and router
 module.exports = {
@@ -840,6 +1353,8 @@ module.exports = {
     testLogin,
     solveCaptchaWithOpenAI,
     extractCaptchaImage,
+    runTokenExtraction,
+    isExtractionInProgress,
     router
 };
 
