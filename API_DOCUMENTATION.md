@@ -734,7 +734,7 @@ Rotate the token by updating the `POS_API_TOKEN` env var on the server (`.env` l
 **Table fields**
 
 - `rent_id` (`char(6)`): primary key, auto-generated as `R#####` (e.g. `R00042`).
-- `battery_id` (`bigint`, nullable): the rented battery.
+- `battery_id` (`text`, nullable): power-bank silkscreen SN (e.g. `CUBH5A000544`); legacy integer ids still accepted.
 - `stripe_pi` (`text`, unique): Stripe Payment Intent id captured at checkout.
 - `start_time` (`timestamptz`): defaults to `now()` if omitted.
 - `station_start` (`text`): station id where the battery was taken.
@@ -750,7 +750,7 @@ curl -X POST https://api.cuub.tech/pos/start_rent \
   -H "Authorization: Bearer $POS_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "battery_id": 1042,
+    "battery_id": "CUBH5A000544",
     "stripe_pi": "pi_3OabCdEfGhIjKlMn0001",
     "station_start": "STATION001"
   }'
@@ -760,7 +760,7 @@ curl -X POST https://api.cuub.tech/pos/start_rent \
 
 - `stripe_pi` (required): unique Stripe Payment Intent id.
 - `station_start` (required): station id where the rent began.
-- `battery_id` (optional): bigint id of the rented battery.
+- `battery_id` (optional): power-bank SN string (e.g. `CUBH5A000544`) or legacy integer id.
 - `start_time` (optional): ISO timestamp; defaults to server `now()`.
 
 **Expected response**
@@ -783,7 +783,7 @@ curl -X POST https://api.cuub.tech/pos/start_rent \
 
 **Error responses**
 
-- `400`: missing/invalid field (e.g. non-integer `battery_id`, blank `stripe_pi`).
+- `400`: missing/invalid field (e.g. malformed `battery_id`, blank `stripe_pi`).
 - `409`: duplicate `stripe_pi` (a rent already exists for that payment intent).
 
 ### 25. End a rent (battery returned)
@@ -815,7 +815,7 @@ curl -X PATCH https://api.cuub.tech/pos/end_rent \
 
 **Body fields**
 
-- `battery_id` (required): bigint id of the returned powerbank. The open rent for this battery is closed.
+- `battery_id` (required): power-bank SN (e.g. `CUBH5A000544`) or legacy integer id. The open rent for this battery is closed.
 - `station_end` (required): station id where the battery was returned.
 - `end_time` (optional): ISO timestamp; defaults to the current server time.
 

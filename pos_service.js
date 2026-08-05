@@ -9,7 +9,8 @@ const router = express.Router();
  *
  * Table public.rents (POS-DB):
  *   rent_id        char(6)    PK, auto-generated as R##### via rents_seq
- *   battery_id     bigint     nullable
+ *   battery_id     text       nullable  (power-bank silkscreen SN, e.g. CUBH5A000544;
+ *                                        legacy numeric ids also accepted)
  *   stripe_pi      text       NOT NULL, UNIQUE
  *   start_time     timestamptz NOT NULL, default now()
  *   station_start  text       NOT NULL
@@ -129,6 +130,48 @@ pool.on('error', (err) => {
   console.error('❌ POS Service: Unexpected error on idle client', err);
 });
 
+/**
+ * One-time (idempotent) migration: battery_id used to be bigint (legacy fake
+ * timestamps / numeric ids). POS stations now send silkscreen SNs like
+ * `CUBH5A000544`, so the column must be text. Safe to re-run — no-ops when
+ * already text.
+ */
+async function ensureBatteryIdColumnIsText() {
+  let client;
+  try {
+    client = await pool.connect();
+    const { rows } = await client.query(`
+      SELECT data_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'rents'
+        AND column_name = 'battery_id'
+    `);
+    if (rows.length === 0) {
+      console.warn('⚠️  POS Service: rents.battery_id column not found — skipping migration');
+      return;
+    }
+    const type = rows[0].data_type;
+    if (type === 'text' || type === 'character varying' || type === 'character') {
+      console.log(`✅ POS Service: rents.battery_id already ${type}`);
+      return;
+    }
+    console.log(`🔧 POS Service: migrating rents.battery_id from ${type} → text…`);
+    await client.query(`
+      ALTER TABLE rents
+      ALTER COLUMN battery_id TYPE text
+      USING battery_id::text
+    `);
+    console.log('✅ POS Service: rents.battery_id migrated to text');
+  } catch (err) {
+    console.error('❌ POS Service: failed to migrate rents.battery_id:', err.message || err);
+  } finally {
+    if (client) client.release();
+  }
+}
+
+ensureBatteryIdColumnIsText();
+
 function rowToRent(row) {
   if (!row) return null;
   return {
@@ -144,7 +187,10 @@ function rowToRent(row) {
 
 /**
  * Validate and normalize an incoming battery_id.
- * The DB column is bigint and nullable. Accept number or numeric string.
+ * Accepts:
+ *   - silkscreen SN strings from the cabinet (e.g. CUBH5A000544)
+ *   - legacy integer / numeric-string ids
+ *   - omitted / null / '' → null
  * @returns {{ ok: true, value: string|null } | { ok: false, error: string }}
  */
 function parseBatteryId(raw) {
@@ -152,8 +198,13 @@ function parseBatteryId(raw) {
     return { ok: true, value: null };
   }
   const str = String(raw).trim();
-  if (!/^-?\d+$/.test(str)) {
-    return { ok: false, error: 'battery_id must be an integer (or omitted)' };
+  // Alphanumeric SN (CUBH5A000544) or legacy numeric id. Keep it tight so we
+  // don't accept arbitrary free text into the rents table.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(str)) {
+    return {
+      ok: false,
+      error: 'battery_id must be a power-bank SN (e.g. CUBH5A000544) or integer (or omitted)'
+    };
   }
   return { ok: true, value: str };
 }
@@ -178,7 +229,7 @@ function parseTimestamp(raw, fieldName) {
  * Body: { battery_id?, stripe_pi, start_time?, station_start }
  *   - stripe_pi (required): unique Stripe Payment Intent id for the rent.
  *   - station_start (required): station id where the battery was taken.
- *   - battery_id (optional): bigint reference to the rented battery.
+ *   - battery_id (optional): power-bank SN (e.g. CUBH5A000544) or legacy integer id.
  *   - start_time (optional): ISO timestamp; defaults to DB now().
  */
 router.post('/pos/start_rent', async (req, res) => {

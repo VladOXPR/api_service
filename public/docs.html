@@ -1113,7 +1113,7 @@
         <div class="fields">
           <div class="field-row"><div class="fname">stripe_pi</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Unique Stripe Payment Intent id for the rent.</div></div>
           <div class="field-row"><div class="fname">station_start</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Station id where the rent began.</div></div>
-          <div class="field-row"><div class="fname">battery_id</div><div class="ftype">bigint <span class="opt">optional</span></div><div class="fdesc">Numeric id of the rented battery.</div></div>
+          <div class="field-row"><div class="fname">battery_id</div><div class="ftype">text <span class="opt">optional</span></div><div class="fdesc">Power-bank silkscreen SN (e.g. CUBH5A000544). Legacy integer ids still accepted.</div></div>
           <div class="field-row"><div class="fname">start_time</div><div class="ftype">ISO timestamp <span class="opt">optional</span></div><div class="fdesc">Defaults to server <code>now()</code> if omitted.</div></div>
         </div>
 
@@ -1165,7 +1165,7 @@
 
         <div class="subhead">Body parameters</div>
         <div class="fields">
-          <div class="field-row"><div class="fname">battery_id</div><div class="ftype">bigint <span class="req">required</span></div><div class="fdesc">Id of the returned powerbank. The open rent for this battery is closed.</div></div>
+          <div class="field-row"><div class="fname">battery_id</div><div class="ftype">text <span class="req">required</span></div><div class="fdesc">Power-bank SN (e.g. CUBH5A000544). The open rent for this battery is closed.</div></div>
           <div class="field-row"><div class="fname">station_end</div><div class="ftype">string <span class="req">required</span></div><div class="fdesc">Station id where the battery was returned.</div></div>
           <div class="field-row"><div class="fname">end_time</div><div class="ftype">ISO timestamp <span class="opt">optional</span></div><div class="fdesc">Defaults to current server time if omitted.</div></div>
         </div>
